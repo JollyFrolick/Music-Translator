@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title>Lyric Lens</title>
+  <rect width="512" height="512" rx="96" fill="#f7f4ee"/>
+  <circle cx="256" cy="256" r="174" fill="#0f766e"/>
+  <path d="M170 160h172v56H170z" fill="#f8c45c"/>
+  <path d="M170 244h172v34H170zM170 318h128v34H170z" fill="#ffffff"/>
+  <path d="M348 322c31 0 56-25 56-56s-25-56-56-56-56 25-56 56 25 56 56 56Zm40 22 48 48" fill="none" stroke="#222222" stroke-width="34" stroke-linecap="round"/>
+</svg>

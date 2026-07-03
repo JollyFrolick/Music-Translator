@@ -1,0 +1,11 @@
+{
+  "name": "music-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "node server.mjs --check",
+    "preview": "NODE_ENV=production node server.mjs"
+  }
+}
