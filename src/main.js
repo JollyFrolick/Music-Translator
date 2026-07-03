@@ -24,7 +24,12 @@ const state = {
 };
 
 const root = document.querySelector("#root");
+const autoTranslateDelayMs = 800;
 let isComposingText = false;
+let autoTranslateTimer = null;
+let activeTranslationController = null;
+let translationRequestId = 0;
+let isTranslating = false;
 
 function splitLyrics(value) {
   return value
@@ -54,6 +59,68 @@ function getLines() {
 
 function romanizationLabel() {
   return state.language === "cantonese" ? "Jyutping" : "Pinyin";
+}
+
+function getTranslationSignature(lines = splitLyrics(state.lyrics)) {
+  return JSON.stringify({
+    language: state.language,
+    lines
+  });
+}
+
+function normalizeTranslationList(translations, lineCount) {
+  return Array.from({ length: lineCount }, (_, index) =>
+    typeof translations[index] === "string" ? translations[index].trim() : ""
+  );
+}
+
+function hasCompleteTranslations(lines = splitLyrics(state.lyrics), translations = state.translations) {
+  return (
+    lines.length > 0 &&
+    lines.every((_, index) => typeof translations[index] === "string" && translations[index].trim())
+  );
+}
+
+function getStatusIcon() {
+  if (isTranslating) {
+    return "*";
+  }
+  return state.message.includes("offline") ? "!" : "#";
+}
+
+function getStatusText(lineCount = splitLyrics(state.lyrics).length) {
+  if (isTranslating) {
+    return "Translating to English...";
+  }
+  return state.message || `${lineCount} lines`;
+}
+
+function cancelAutoTranslate({ abort = false } = {}) {
+  if (autoTranslateTimer) {
+    clearTimeout(autoTranslateTimer);
+    autoTranslateTimer = null;
+  }
+
+  if (abort && activeTranslationController) {
+    activeTranslationController.abort();
+    activeTranslationController = null;
+    translationRequestId += 1;
+    isTranslating = false;
+  }
+}
+
+function scheduleAutoTranslate(delay = autoTranslateDelayMs) {
+  cancelAutoTranslate();
+
+  const lyricLines = splitLyrics(state.lyrics);
+  if (!lyricLines.length || hasCompleteTranslations(lyricLines)) {
+    return;
+  }
+
+  autoTranslateTimer = window.setTimeout(() => {
+    autoTranslateTimer = null;
+    translateLyrics();
+  }, delay);
 }
 
 function saveDraft() {
@@ -209,6 +276,7 @@ function renderLoadedTrack() {
 function renderOutputPanel() {
   const lines = getLines();
   const label = romanizationLabel();
+  const translationPlaceholder = isTranslating ? "Translating..." : "Translation pending";
 
   return `
     <div class="output-heading">
@@ -230,7 +298,7 @@ function renderOutputPanel() {
                     <div class="line-content">
                       <p class="original">${escapeHtml(line.original)}</p>
                       <p class="romanization">${escapeHtml(line.romanization)}</p>
-                      <p class="${line.english ? "english" : "english muted"}">${escapeHtml(line.english || "Translation pending")}</p>
+                      <p class="${line.english ? "english" : "english muted"}">${escapeHtml(line.english || translationPlaceholder)}</p>
                     </div>
                   </article>
                 `
@@ -247,10 +315,10 @@ function refreshStatus() {
   const statusText = root.querySelector(".status-text");
 
   if (statusIcon) {
-    statusIcon.textContent = state.message.includes("offline") ? "!" : "#";
+    statusIcon.textContent = getStatusIcon();
   }
   if (statusText) {
-    statusText.textContent = state.message || `${splitLyrics(state.lyrics).length} lines`;
+    statusText.textContent = getStatusText();
   }
 }
 
@@ -273,6 +341,7 @@ function render() {
   const lines = getLines();
   const label = romanizationLabel();
   const isCustomMode = state.searchMode === "custom";
+  const statusText = getStatusText(lines.length);
 
   root.innerHTML = `
     <main class="app-shell">
@@ -286,8 +355,8 @@ function render() {
         </div>
 
         <div class="status-strip" role="status">
-          <span class="status-icon">${state.message.includes("offline") ? "!" : "#"}</span>
-          <span class="status-text">${escapeHtml(state.message || `${lines.length} lines`)}</span>
+          <span class="status-icon">${getStatusIcon()}</span>
+          <span class="status-text">${escapeHtml(statusText)}</span>
         </div>
       </header>
 
@@ -370,10 +439,6 @@ function render() {
                 </label>`
           }
 
-          <button class="primary-action" type="button" data-action="translate">
-            <span class="button-icon">*</span>
-            <span>Translate</span>
-          </button>
         </div>
 
         <div class="output-panel" aria-label="Translated lyrics">
@@ -390,33 +455,80 @@ function setMessage(message) {
   saveDraft();
 }
 
-async function translate(button) {
+async function translateLyrics() {
   const lyricLines = splitLyrics(state.lyrics);
   if (!lyricLines.length) {
+    state.translations = [];
+    isTranslating = false;
     setMessage("No lyrics yet.");
     return;
   }
 
-  button.disabled = true;
-  button.innerHTML = `<span class="button-icon spin">*</span><span>Translating</span>`;
-  state.message = "";
+  if (hasCompleteTranslations(lyricLines)) {
+    return;
+  }
+
+  const requestId = ++translationRequestId;
+  const signature = getTranslationSignature(lyricLines);
+
+  if (activeTranslationController) {
+    activeTranslationController.abort();
+  }
+
+  const controller = new AbortController();
+  activeTranslationController = controller;
+  isTranslating = true;
+  state.message = "Translating to English...";
+  refreshOutputPanel();
+  saveDraft();
 
   try {
     const response = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language: state.language, lines: lyricLines })
+      body: JSON.stringify({ language: state.language, lines: lyricLines }),
+      signal: controller.signal
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       throw new Error(data.error || "Translation failed.");
     }
 
-    state.translations = Array.isArray(data.translations) ? data.translations : [];
-    setMessage("Translation ready.");
+    const translations = normalizeTranslationList(
+      Array.isArray(data.translations) ? data.translations : [],
+      lyricLines.length
+    );
+
+    if (!hasCompleteTranslations(lyricLines, translations)) {
+      throw new Error("Translation returned incomplete results.");
+    }
+
+    if (requestId !== translationRequestId || signature !== getTranslationSignature()) {
+      return;
+    }
+
+    state.translations = translations;
+    isTranslating = false;
+    state.message = "Translation ready.";
+    refreshOutputPanel();
+    saveDraft();
   } catch (error) {
-    setMessage(error instanceof Error ? error.message : "Translation failed.");
+    if (error instanceof Error && error.name === "AbortError") {
+      return;
+    }
+    if (requestId !== translationRequestId || signature !== getTranslationSignature()) {
+      return;
+    }
+
+    isTranslating = false;
+    state.message = error instanceof Error ? error.message : "Translation failed.";
+    refreshOutputPanel();
+    saveDraft();
+  } finally {
+    if (activeTranslationController === controller) {
+      activeTranslationController = null;
+    }
   }
 }
 
@@ -476,6 +588,7 @@ function useSearchResult(index) {
     return;
   }
 
+  cancelAutoTranslate({ abort: true });
   state.title = result.title || state.title;
   state.artist = result.artist || state.artist;
   state.searchQuery = state.searchMode === "artist" ? state.artist : state.title;
@@ -485,6 +598,7 @@ function useSearchResult(index) {
   state.message = "Lyrics loaded.";
   saveDraft();
   render();
+  scheduleAutoTranslate(0);
 }
 
 function searchSuggestedArtist(artist) {
@@ -538,10 +652,12 @@ function handleInput(event) {
 
   state[field] = event.target.value;
   if (field === "lyrics") {
+    cancelAutoTranslate({ abort: true });
     state.translations = [];
     state.message = "";
     if (!event.isComposing && !isComposingText) {
       refreshOutputPanel();
+      scheduleAutoTranslate();
     }
   }
   if (field === "searchQuery") {
@@ -570,9 +686,11 @@ function handleCompositionEnd(event) {
   state[field] = event.target.value;
 
   if (field === "lyrics") {
+    cancelAutoTranslate({ abort: true });
     state.translations = [];
     state.message = "";
     refreshOutputPanel();
+    scheduleAutoTranslate(250);
   }
 
   if (field === "searchQuery") {
@@ -595,11 +713,16 @@ function handleClick(event) {
   const action = button.dataset.action;
 
   if (action === "language") {
+    if (state.language === button.dataset.language) {
+      return;
+    }
+    cancelAutoTranslate({ abort: true });
     state.language = button.dataset.language;
     state.translations = [];
     state.message = "";
     saveDraft();
     render();
+    scheduleAutoTranslate(0);
   }
 
   if (action === "search-mode") {
@@ -616,6 +739,7 @@ function handleClick(event) {
   }
 
   if (action === "sample") {
+    cancelAutoTranslate({ abort: true });
     state.lyrics = sampleLyrics;
     state.translations = [];
     state.searchResults = [];
@@ -623,6 +747,7 @@ function handleClick(event) {
     state.message = "";
     saveDraft();
     render();
+    scheduleAutoTranslate(0);
   }
 
   if (action === "copy") {
@@ -634,6 +759,7 @@ function handleClick(event) {
   }
 
   if (action === "clear") {
+    cancelAutoTranslate({ abort: true });
     state.searchQuery = "";
     state.title = "";
     state.artist = "";
@@ -659,12 +785,13 @@ function handleClick(event) {
   }
 
   if (action === "translate") {
-    translate(button);
+    translateLyrics();
   }
 }
 
 loadDraft();
 render();
+scheduleAutoTranslate(0);
 root.addEventListener("input", handleInput);
 root.addEventListener("compositionstart", handleCompositionStart);
 root.addEventListener("compositionend", handleCompositionEnd);

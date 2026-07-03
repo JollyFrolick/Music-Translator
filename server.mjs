@@ -12,6 +12,7 @@ const host = "0.0.0.0";
 const maxBodyBytes = 1_000_000;
 const appUserAgent = "Lyric Lens/0.1 local PWA";
 const portRetryLimit = 10;
+const myMemoryMaxChars = 450;
 
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
   console.error("PORT must be a number from 1 to 65535.");
@@ -44,6 +45,159 @@ if (process.argv.includes("--check")) {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
+}
+
+function decodeCodePoint(match, code, radix = 10) {
+  const codePoint = parseInt(code, radix);
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return match;
+  }
+  return String.fromCodePoint(codePoint);
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, decodeCodePoint)
+    .replace(/&#x([\da-f]+);/gi, (match, code) => decodeCodePoint(match, code, 16));
+}
+
+function normalizeTranslations(translations, lineCount) {
+  return Array.from({ length: lineCount }, (_, index) =>
+    typeof translations[index] === "string" ? decodeHtmlEntities(translations[index]).trim() : ""
+  );
+}
+
+function hasCompleteTranslations(translations) {
+  return translations.every((translation) => translation.trim());
+}
+
+function mergeTranslations(primary, fallback) {
+  return primary.map((translation, index) => translation || fallback[index] || "");
+}
+
+function chunkLines(lines) {
+  const chunks = [];
+  let currentLines = [];
+  let currentStart = 0;
+  let currentLength = 0;
+
+  lines.forEach((line, index) => {
+    const separatorLength = currentLines.length ? 1 : 0;
+    const nextLength = currentLength + separatorLength + line.length;
+
+    if (currentLines.length && nextLength > myMemoryMaxChars) {
+      chunks.push({ start: currentStart, lines: currentLines });
+      currentLines = [];
+      currentStart = index;
+      currentLength = 0;
+    }
+
+    currentLength += (currentLines.length ? 1 : 0) + line.length;
+    currentLines.push(line);
+  });
+
+  if (currentLines.length) {
+    chunks.push({ start: currentStart, lines: currentLines });
+  }
+
+  return chunks;
+}
+
+function splitTranslatedText(value) {
+  return decodeHtmlEntities(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function fetchMyMemoryLines(lines, language) {
+  const sourceLanguage = language === "cantonese" ? "zh-TW" : "zh-CN";
+  const params = new URLSearchParams({
+    q: lines.join("\n"),
+    langpair: `${sourceLanguage}|en`
+  });
+
+  const apiResponse = await fetch(`https://api.mymemory.translated.net/get?${params}`, {
+    headers: { "User-Agent": appUserAgent }
+  });
+  const data = await apiResponse.json();
+
+  if (!apiResponse.ok || Number(data.responseStatus) >= 400) {
+    throw new Error(data.responseDetails || "Fallback translation failed.");
+  }
+
+  const translatedText = data.responseData?.translatedText;
+  if (typeof translatedText !== "string" || !translatedText.trim()) {
+    throw new Error("Fallback translation returned no text.");
+  }
+
+  return splitTranslatedText(translatedText);
+}
+
+async function translateWithMyMemory(lines, language) {
+  const translations = Array.from({ length: lines.length }, () => "");
+
+  for (const chunk of chunkLines(lines)) {
+    const translatedLines = await fetchMyMemoryLines(chunk.lines, language);
+
+    if (translatedLines.length === chunk.lines.length) {
+      translatedLines.forEach((translation, offset) => {
+        translations[chunk.start + offset] = translation;
+      });
+      continue;
+    }
+
+    for (let offset = 0; offset < chunk.lines.length; offset += 1) {
+      const [translation] = await fetchMyMemoryLines([chunk.lines[offset]], language);
+      translations[chunk.start + offset] = translation || translatedLines[offset] || "";
+    }
+  }
+
+  return normalizeTranslations(translations, lines.length);
+}
+
+async function translateWithOpenAI(lines, language) {
+  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "Translate Chinese song lyric lines into natural English. Preserve the number and order of lines. Return only JSON in the shape {\"translations\":[\"...\"]}. Keep imagery and emotion, but avoid adding interpretation not present in the line."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            language: language === "cantonese" ? "Cantonese" : "Mandarin",
+            lines
+          })
+        }
+      ]
+    })
+  });
+
+  const data = await apiResponse.json();
+  if (!apiResponse.ok) {
+    throw new Error(data.error?.message || "OpenAI translation failed.");
+  }
+
+  const content = data.choices?.[0]?.message?.content || "{}";
+  const parsed = JSON.parse(content);
+  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
+  return normalizeTranslations(translations, lines.length);
 }
 
 function readBody(request) {
@@ -80,60 +234,41 @@ async function handleTranslate(request, response) {
     return sendJson(response, 400, { error: "Expected lines to be an array of strings." });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return sendJson(response, 503, {
-      error: "Translation is offline. Add OPENAI_API_KEY to enable it."
-    });
-  }
+  let translations = Array.from({ length: lines.length }, () => "");
+  let provider = "";
+  let openAiError = null;
 
-  try {
-    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Translate Chinese song lyric lines into natural English. Preserve the number and order of lines. Return only JSON in the shape {\"translations\":[\"...\"]}. Keep imagery and emotion, but avoid adding interpretation not present in the line."
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              language: language === "cantonese" ? "Cantonese" : "Mandarin",
-              lines
-            })
-          }
-        ]
-      })
-    });
-
-    const data = await apiResponse.json();
-    if (!apiResponse.ok) {
-      return sendJson(response, apiResponse.status, {
-        error: data.error?.message || "Translation failed."
-      });
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      translations = await translateWithOpenAI(lines, language);
+      provider = "OpenAI";
+    } catch (error) {
+      openAiError = error;
+      console.error(error);
     }
-
-    const content = data.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
-
-    return sendJson(response, 200, {
-      translations: lines.map((_, index) =>
-        typeof translations[index] === "string" ? translations[index] : ""
-      )
-    });
-  } catch (error) {
-    console.error(error);
-    return sendJson(response, 500, { error: "Translation failed. Try again in a moment." });
   }
+
+  if (!hasCompleteTranslations(translations)) {
+    try {
+      const fallbackTranslations = await translateWithMyMemory(lines, language);
+      translations = mergeTranslations(translations, fallbackTranslations);
+      provider = provider ? `${provider} + MyMemory` : "MyMemory";
+    } catch (error) {
+      console.error(error);
+      const message = openAiError
+        ? "Translation failed. Check your OpenAI key or try again in a moment."
+        : "Translation is temporarily unavailable. Try again in a moment.";
+      return sendJson(response, openAiError ? 502 : 503, { error: message });
+    }
+  }
+
+  if (!hasCompleteTranslations(translations)) {
+    return sendJson(response, 502, {
+      error: "Translation returned incomplete results. Try again in a moment."
+    });
+  }
+
+  return sendJson(response, 200, { translations, provider });
 }
 
 function stripLrcTimestamps(value) {

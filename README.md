@@ -1,6 +1,6 @@
 # Lyric Lens
 
-A small installable PWA for Chinese song lyrics. Search by song title or artist name, paste custom lyrics when needed, choose Mandarin or Cantonese, and the app shows line-by-line romanization plus English translation when an OpenAI API key is configured.
+A small installable PWA for Chinese song lyrics. Search by song title or artist name, paste custom lyrics when needed, choose Mandarin or Cantonese, and the app shows line-by-line romanization plus English translation.
 
 ## Run Locally
 
@@ -24,9 +24,9 @@ http://192.168.2.104:5173
 
 In Safari, use Share -> Add to Home Screen to install it like an app.
 
-## Enable Translation
+## Translation
 
-Romanization works in the browser. Translation uses the local server so your API key is not stored in the phone app.
+Romanization works in the browser. English translation starts automatically when lyrics are loaded or edited, using the local server. Without an OpenAI API key, the app falls back to MyMemory machine translation. With a key, OpenAI is used first and the fallback fills any missing lines.
 
 ```sh
 OPENAI_API_KEY=your_key_here npm run dev
