@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
   "scripts": {
+    "start": "node server.mjs",
     "dev": "node server.mjs",
     "build": "node server.mjs --check",
-    "preview": "NODE_ENV=production node server.mjs"
+    "preview": "NODE_ENV=production npm start"
   }
 }

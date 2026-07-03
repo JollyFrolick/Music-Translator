@@ -24,6 +24,17 @@ http://192.168.2.104:5173
 
 In Safari, use Share -> Add to Home Screen to install it like an app.
 
+## Deploy Online
+
+Use a Node web service host such as Render, Railway, or Fly.io. For Render, connect this repo and use:
+
+```txt
+Build Command: npm install
+Start Command: npm start
+```
+
+The server reads the host-provided `PORT` automatically. Add `OPENAI_API_KEY` as an environment variable if you want OpenAI translations; otherwise the app uses the fallback translator.
+
 ## Translation
 
 Romanization works in the browser. English translation starts automatically when lyrics are loaded or edited, using the local server. Without an OpenAI API key, the app falls back to MyMemory machine translation. With a key, OpenAI is used first and the fallback fills any missing lines.

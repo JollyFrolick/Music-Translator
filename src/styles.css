@@ -291,7 +291,6 @@ textarea:focus {
   min-height: 260px;
 }
 
-.primary-action,
 .secondary-action {
   display: inline-flex;
   align-items: center;
@@ -301,15 +300,6 @@ textarea:focus {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 760;
-}
-
-.primary-action {
-  color: var(--paper-strong);
-  background: var(--teal);
-}
-
-.primary-action:hover {
-  background: var(--teal-dark);
 }
 
 .secondary-action {
@@ -323,7 +313,6 @@ textarea:focus {
   background: rgba(15, 118, 110, 0.13);
 }
 
-.primary-action:disabled,
 .secondary-action:disabled {
   cursor: wait;
   opacity: 0.7;

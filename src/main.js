@@ -784,9 +784,6 @@ function handleClick(event) {
     searchSuggestedArtist(button.dataset.artist || "");
   }
 
-  if (action === "translate") {
-    translateLyrics();
-  }
 }
 
 loadDraft();
