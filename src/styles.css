@@ -137,6 +137,10 @@ button {
   background: rgba(255, 253, 248, 0.78);
 }
 
+.search-toolbar {
+  justify-content: flex-end;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -171,6 +175,10 @@ button {
   justify-content: flex-end;
 }
 
+.search-actions {
+  justify-content: flex-end;
+}
+
 .icon-button {
   display: inline-grid;
   width: 40px;
@@ -195,6 +203,19 @@ button {
   color: var(--coral);
 }
 
+.save-action {
+  width: auto;
+  min-width: 74px;
+  padding: 0 14px;
+  color: var(--paper-strong);
+  background: var(--teal);
+}
+
+.save-action:hover {
+  color: var(--paper-strong);
+  background: var(--teal-dark);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
@@ -210,7 +231,7 @@ button {
 
 .menu-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin-top: 2px;
 }
@@ -537,6 +558,26 @@ textarea:focus {
   overflow: hidden;
 }
 
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 16px 0;
+}
+
+.panel-actions .search-actions {
+  flex-wrap: wrap;
+}
+
+.output-panel .language-controls {
+  width: calc(100% - 32px);
+  margin: 12px 16px 0;
+}
+
+.output-panel .language-controls + .output-heading {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .output-heading {
   display: flex;
   align-items: center;
@@ -760,6 +801,10 @@ textarea:focus {
   .actions {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
+  }
+
+  .search-actions {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .compact-actions {

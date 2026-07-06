@@ -380,12 +380,43 @@ function renderSavedSongs() {
   `;
 }
 
-function renderOutputPanel() {
+function renderLanguageControls() {
+  return `
+    <div class="segmented language-controls" aria-label="Language">
+      <button class="${state.language === "mandarin" ? "active" : ""}" type="button" data-action="language" data-language="mandarin">
+        Mandarin
+      </button>
+      <button class="${state.language === "cantonese" ? "active" : ""}" type="button" data-action="language" data-language="cantonese">
+        Cantonese
+      </button>
+    </div>
+  `;
+}
+
+function renderSearchActions() {
+  return `
+    <div class="panel-actions" aria-label="Lyric controls">
+      <div class="actions search-actions">
+        <button class="icon-button" type="button" data-action="menu" title="Main menu" aria-label="Main menu">←</button>
+        <button class="icon-button" type="button" data-action="sample" title="Load sample" aria-label="Load sample">↻</button>
+        <button class="icon-button save-action" type="button" data-action="save" title="Save translation" aria-label="Save translation">Save</button>
+        <button class="icon-button" type="button" data-action="copy" title="Copy result" aria-label="Copy result">⧉</button>
+        <button class="icon-button" type="button" data-action="download" title="Download result" aria-label="Download result">↓</button>
+        <button class="icon-button danger" type="button" data-action="clear" title="Clear lyrics" aria-label="Clear lyrics">×</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOutputPanel({ showLanguageControls = false, showSearchActions = false } = {}) {
   const lines = getLines();
   const label = romanizationLabel();
   const translationPlaceholder = isTranslating ? "Translating..." : "Translation pending";
 
   return `
+    ${showSearchActions ? renderSearchActions() : ""}
+    ${showLanguageControls ? renderLanguageControls() : ""}
+
     <div class="output-heading">
       <div>
         <h2>Lines</h2>
@@ -432,7 +463,10 @@ function refreshStatus() {
 function refreshOutputPanel() {
   const outputPanel = root.querySelector(".output-panel");
   if (outputPanel) {
-    outputPanel.innerHTML = renderOutputPanel();
+    outputPanel.innerHTML = renderOutputPanel({
+      showLanguageControls: state.screen === "search",
+      showSearchActions: state.screen === "search"
+    });
   }
   refreshStatus();
 }
@@ -475,11 +509,8 @@ function renderMenu() {
       })}
 
       <section class="menu-actions" aria-label="Search options">
-        <button class="menu-search-button" type="button" data-action="start-search" data-search-mode="artist">
-          <span>Search by Artist</span>
-        </button>
         <button class="menu-search-button" type="button" data-action="start-search" data-search-mode="song">
-          <span>Search by Song Name</span>
+          <span>Search for Song</span>
         </button>
       </section>
 
@@ -530,26 +561,6 @@ function renderSearchScreen() {
     <main class="app-shell">
       ${renderTopbar({ subtitle: `${label} and English`, statusText })}
 
-      <section class="toolbar" aria-label="Lyric controls">
-        <div class="segmented" aria-label="Language">
-          <button class="${state.language === "mandarin" ? "active" : ""}" type="button" data-action="language" data-language="mandarin">
-            Mandarin
-          </button>
-          <button class="${state.language === "cantonese" ? "active" : ""}" type="button" data-action="language" data-language="cantonese">
-            Cantonese
-          </button>
-        </div>
-
-        <div class="actions">
-          <button class="icon-button" type="button" data-action="menu" title="Main menu" aria-label="Main menu">←</button>
-          <button class="icon-button" type="button" data-action="sample" title="Load sample" aria-label="Load sample">↻</button>
-          <button class="icon-button" type="button" data-action="save" title="Save translation" aria-label="Save translation">☆</button>
-          <button class="icon-button" type="button" data-action="copy" title="Copy result" aria-label="Copy result">⧉</button>
-          <button class="icon-button" type="button" data-action="download" title="Download result" aria-label="Download result">↓</button>
-          <button class="icon-button danger" type="button" data-action="clear" title="Clear lyrics" aria-label="Clear lyrics">×</button>
-        </div>
-      </section>
-
       <section class="workspace">
         <div class="input-panel">
           <div class="search-panel">
@@ -583,7 +594,7 @@ function renderSearchScreen() {
                       data-field="searchQuery"
                       autocomplete="off"
                       autocapitalize="off"
-                      placeholder="${state.searchMode === "artist" ? "邓丽君" : "月亮代表我的心"}"
+                      placeholder=""
                     />
                   </label>`
             }
@@ -592,7 +603,6 @@ function renderSearchScreen() {
               isCustomMode
                 ? ""
                 : `<button class="secondary-action" type="button" data-action="search">
-                    <span class="button-icon">?</span>
                     <span>Find lyrics</span>
                   </button>`
             }
@@ -613,7 +623,7 @@ function renderSearchScreen() {
         </div>
 
         <div class="output-panel" aria-label="Translated lyrics">
-          ${renderOutputPanel()}
+          ${renderOutputPanel({ showLanguageControls: true, showSearchActions: true })}
         </div>
       </section>
     </main>
