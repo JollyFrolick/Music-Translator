@@ -18,31 +18,67 @@ create index if not exists saved_translations_user_saved_at_idx
 
 alter table public.saved_translations enable row level security;
 
-drop policy if exists "Users can read their saved translations" on public.saved_translations;
-create policy "Users can read their saved translations"
-  on public.saved_translations
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'saved_translations'
+      and policyname = 'Users can read their saved translations'
+  ) then
+    create policy "Users can read their saved translations"
+      on public.saved_translations
+      for select
+      to authenticated
+      using (auth.uid() = user_id);
+  end if;
+end $$;
 
-drop policy if exists "Users can create their saved translations" on public.saved_translations;
-create policy "Users can create their saved translations"
-  on public.saved_translations
-  for insert
-  to authenticated
-  with check (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'saved_translations'
+      and policyname = 'Users can create their saved translations'
+  ) then
+    create policy "Users can create their saved translations"
+      on public.saved_translations
+      for insert
+      to authenticated
+      with check (auth.uid() = user_id);
+  end if;
+end $$;
 
-drop policy if exists "Users can update their saved translations" on public.saved_translations;
-create policy "Users can update their saved translations"
-  on public.saved_translations
-  for update
-  to authenticated
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'saved_translations'
+      and policyname = 'Users can update their saved translations'
+  ) then
+    create policy "Users can update their saved translations"
+      on public.saved_translations
+      for update
+      to authenticated
+      using (auth.uid() = user_id)
+      with check (auth.uid() = user_id);
+  end if;
+end $$;
 
-drop policy if exists "Users can delete their saved translations" on public.saved_translations;
-create policy "Users can delete their saved translations"
-  on public.saved_translations
-  for delete
-  to authenticated
-  using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'saved_translations'
+      and policyname = 'Users can delete their saved translations'
+  ) then
+    create policy "Users can delete their saved translations"
+      on public.saved_translations
+      for delete
+      to authenticated
+      using (auth.uid() = user_id);
+  end if;
+end $$;
