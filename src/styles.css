@@ -152,11 +152,14 @@ button {
 }
 
 .segmented button {
+  display: grid;
   min-height: 38px;
+  place-items: center;
   border-radius: 6px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  text-align: center;
 }
 
 .segmented button.active {
@@ -231,7 +234,7 @@ button {
 
 .menu-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 2px;
 }
@@ -284,7 +287,31 @@ button {
 
 .search-mode {
   width: 100%;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.custom-workspace {
+  align-items: stretch;
+}
+
+.custom-input-panel {
+  padding-bottom: 0;
+  position: static;
+}
+
+.custom-search-panel {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}
+
+.custom-meta-box {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.06);
 }
 
 .loaded-track {
@@ -472,7 +499,12 @@ textarea:focus {
 }
 
 .custom-lyrics-box textarea {
+  height: 100%;
   min-height: 260px;
+}
+
+.custom-search-panel .custom-lyrics-box {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .secondary-action {
@@ -825,6 +857,10 @@ textarea:focus {
   }
 
   .menu-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .custom-meta-box {
     grid-template-columns: 1fr;
   }
 

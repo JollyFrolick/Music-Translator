@@ -512,6 +512,9 @@ function renderMenu() {
         <button class="menu-search-button" type="button" data-action="start-search" data-search-mode="song">
           <span>Search for Song</span>
         </button>
+        <button class="menu-search-button" type="button" data-action="start-search" data-search-mode="custom">
+          <span>Custom</span>
+        </button>
       </section>
 
       ${renderSavedSongs()}
@@ -561,24 +564,48 @@ function renderSearchScreen() {
     <main class="app-shell">
       ${renderTopbar({ subtitle: `${label} and English`, statusText })}
 
-      <section class="workspace">
-        <div class="input-panel">
-          <div class="search-panel">
-            <div class="segmented search-mode" aria-label="Search type">
-              <button class="${state.searchMode === "song" ? "active" : ""}" type="button" data-action="search-mode" data-search-mode="song">
-                Song
-              </button>
-              <button class="${state.searchMode === "artist" ? "active" : ""}" type="button" data-action="search-mode" data-search-mode="artist">
-                Artist
-              </button>
-              <button class="${state.searchMode === "custom" ? "active" : ""}" type="button" data-action="search-mode" data-search-mode="custom">
-                Custom
-              </button>
-            </div>
+      <section class="${isCustomMode ? "workspace custom-workspace" : "workspace"}">
+        <div class="${isCustomMode ? "input-panel custom-input-panel" : "input-panel"}">
+          <div class="${isCustomMode ? "search-panel custom-search-panel" : "search-panel"}">
+            ${
+              isCustomMode
+                ? ""
+                : `<div class="segmented search-mode" aria-label="Search type">
+                    <button class="${state.searchMode === "song" ? "active" : ""}" type="button" data-action="search-mode" data-search-mode="song">
+                      Song
+                    </button>
+                    <button class="${state.searchMode === "artist" ? "active" : ""}" type="button" data-action="search-mode" data-search-mode="artist">
+                      Artist
+                    </button>
+                  </div>`
+            }
 
             ${
               isCustomMode
-                ? `<label class="custom-lyrics-box">
+                ? `<div class="custom-meta-box">
+                    <label>
+                      <span>Song name</span>
+                      <input
+                        value="${escapeHtml(state.title)}"
+                        data-field="title"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        placeholder=""
+                      />
+                    </label>
+                    <label>
+                      <span>Artist</span>
+                      <input
+                        value="${escapeHtml(state.artist)}"
+                        data-field="artist"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        placeholder=""
+                      />
+                    </label>
+                  </div>
+
+                  <label class="custom-lyrics-box">
                     <span>Custom lyrics</span>
                     <textarea
                       data-field="lyrics"
@@ -896,7 +923,7 @@ function showMenu() {
 function startSearch(mode) {
   cancelAutoTranslate({ abort: true });
   state.screen = "search";
-  state.searchMode = mode === "artist" ? "artist" : "song";
+  state.searchMode = ["artist", "custom"].includes(mode) ? mode : "song";
   state.searchQuery = "";
   state.title = "";
   state.artist = "";
@@ -1034,10 +1061,8 @@ function handleClick(event) {
   if (action === "search-mode") {
     const nextMode = button.dataset.searchMode;
     state.screen = "search";
-    state.searchMode = ["artist", "custom"].includes(nextMode) ? nextMode : "song";
-    if (state.searchMode !== "custom") {
-      state.searchQuery = "";
-    }
+    state.searchMode = nextMode === "artist" ? "artist" : "song";
+    state.searchQuery = "";
     state.searchResults = [];
     state.searchMeta = null;
     state.message = "";
