@@ -26,14 +26,50 @@ In Safari, use Share -> Add to Home Screen to install it like an app.
 
 ## Deploy Online
 
-Use a Node web service host such as Render, Railway, or Fly.io. For Render, connect this repo and use:
+### Vercel
+
+This repo is ready for Vercel. Import the GitHub repo in Vercel and use:
+
+```txt
+Framework Preset: Other
+Build Command: npm run build
+```
+
+The browser app is served as static files, and these Vercel Functions handle server-only work:
+
+```txt
+/api/translate
+/api/lyrics-search
+/api/config
+```
+
+Add `OPENAI_API_KEY` as a Vercel environment variable if you want OpenAI translations. Without it, the app uses the fallback translator.
+
+### Cloud Sync
+
+Saved songs sync across devices when Supabase is configured.
+
+1. Create a Supabase project.
+2. In Supabase SQL Editor, run `supabase/schema.sql`.
+3. In Vercel, add these environment variables:
+
+```txt
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+After redeploying, the app shows an Account panel on the home screen. Sign in on your phone and laptop to share the same saved-song library.
+
+### Other Node Hosts
+
+You can still use a Node web service host such as Render, Railway, or Fly.io. For Render, connect this repo and use:
 
 ```txt
 Build Command: npm install
 Start Command: npm start
 ```
 
-The server reads the host-provided `PORT` automatically. Add `OPENAI_API_KEY` as an environment variable if you want OpenAI translations; otherwise the app uses the fallback translator.
+The local Node server reads the host-provided `PORT` automatically.
 
 ## Translation
 

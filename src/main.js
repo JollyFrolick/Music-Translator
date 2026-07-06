@@ -3,6 +3,8 @@ import ToJyutping from "https://esm.sh/to-jyutping@3.1.1";
 
 const STORAGE_KEY = "lyric-lens-draft";
 const SAVED_TRANSLATIONS_KEY = "lyric-lens-saved-translations";
+const CLOUD_TABLE = "saved_translations";
+const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2";
 const maxSavedTranslations = 30;
 const sampleLyrics = `月亮代表我的心
 你问我爱你有多深
@@ -24,7 +26,15 @@ const state = {
   savedTranslations: [],
   searchResults: [],
   searchMeta: null,
-  message: ""
+  message: "",
+  auth: {
+    status: "disabled",
+    user: null,
+    email: "",
+    password: "",
+    message: "",
+    busy: false
+  }
 };
 
 const root = document.querySelector("#root");
@@ -34,6 +44,10 @@ let autoTranslateTimer = null;
 let activeTranslationController = null;
 let translationRequestId = 0;
 let isTranslating = false;
+const containedScrollSelector = ".lyrics-box textarea, .custom-lyrics-box textarea, .line-list";
+const touchStartByElement = new WeakMap();
+let supabaseClient = null;
+let authChangeSubscription = null;
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -219,6 +233,255 @@ function saveSavedTranslations() {
   localStorage.setItem(SAVED_TRANSLATIONS_KEY, JSON.stringify(state.savedTranslations));
 }
 
+function isCloudSyncReady() {
+  return Boolean(supabaseClient && state.auth.status === "signed-in" && state.auth.user?.id);
+}
+
+function dedupeSavedTranslations(items) {
+  const seen = new Set();
+  return items
+    .map(normalizeSavedTranslation)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime())
+    .filter((item) => {
+      const key = getSavedTranslationKey(item);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, maxSavedTranslations);
+}
+
+function savedItemToCloudRow(item) {
+  return {
+    id: item.id,
+    user_id: state.auth.user.id,
+    saved_at: item.savedAt,
+    language: item.language,
+    search_mode: item.searchMode,
+    search_query: item.searchQuery,
+    title: item.title,
+    artist: item.artist,
+    lyrics: item.lyrics,
+    translations: item.translations
+  };
+}
+
+function cloudRowToSavedItem(row) {
+  return normalizeSavedTranslation({
+    id: row.id,
+    savedAt: row.saved_at,
+    language: row.language,
+    searchMode: row.search_mode,
+    searchQuery: row.search_query,
+    title: row.title,
+    artist: row.artist,
+    lyrics: row.lyrics,
+    translations: Array.isArray(row.translations) ? row.translations : []
+  });
+}
+
+async function syncSavedTranslation(savedItem, { silent = false } = {}) {
+  if (!isCloudSyncReady()) {
+    return false;
+  }
+
+  const { error } = await supabaseClient
+    .from(CLOUD_TABLE)
+    .upsert(savedItemToCloudRow(savedItem), { onConflict: "id" });
+
+  if (error) {
+    if (!silent) {
+      setMessage("Saved on this device. Cloud sync failed.");
+    }
+    console.error(error);
+    return false;
+  }
+
+  return true;
+}
+
+async function deleteCloudSavedTranslation(savedItem) {
+  if (!isCloudSyncReady() || !savedItem?.id) {
+    return;
+  }
+
+  const { error } = await supabaseClient.from(CLOUD_TABLE).delete().eq("id", savedItem.id);
+  if (error) {
+    console.error(error);
+    setMessage("Removed here. Cloud delete failed.");
+  }
+}
+
+async function loadCloudSavedTranslations({ mergeLocal = false } = {}) {
+  if (!isCloudSyncReady()) {
+    return;
+  }
+
+  const localItems = mergeLocal ? state.savedTranslations : [];
+  const { data, error } = await supabaseClient
+    .from(CLOUD_TABLE)
+    .select("id,saved_at,language,search_mode,search_query,title,artist,lyrics,translations")
+    .order("saved_at", { ascending: false })
+    .limit(maxSavedTranslations);
+
+  if (error) {
+    console.error(error);
+    state.auth.message = "Could not load cloud library.";
+    render();
+    return;
+  }
+
+  const cloudItems = Array.isArray(data) ? data.map(cloudRowToSavedItem).filter(Boolean) : [];
+  const cloudKeys = new Set(cloudItems.map(getSavedTranslationKey));
+  const unsyncedLocalItems = localItems.filter((item) => !cloudKeys.has(getSavedTranslationKey(item)));
+
+  for (const item of unsyncedLocalItems) {
+    await syncSavedTranslation(item, { silent: true });
+  }
+
+  state.savedTranslations = dedupeSavedTranslations([...unsyncedLocalItems, ...cloudItems]);
+  saveSavedTranslations();
+  render();
+}
+
+async function applyAuthSession(session, { mergeLocal = false } = {}) {
+  if (session?.user) {
+    state.auth.status = "signed-in";
+    state.auth.user = session.user;
+    state.auth.email = session.user.email || state.auth.email;
+    state.auth.password = "";
+    state.auth.message = "Cloud sync on.";
+    await loadCloudSavedTranslations({ mergeLocal });
+    return;
+  }
+
+  state.auth.status = supabaseClient ? "signed-out" : "disabled";
+  state.auth.user = null;
+  state.auth.password = "";
+  state.auth.message = "";
+  render();
+}
+
+async function initializeCloudSync() {
+  state.auth.status = "loading";
+  render();
+
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+    const config = await response.json();
+
+    if (!response.ok || !config.cloudSyncEnabled) {
+      state.auth.status = "disabled";
+      state.auth.message = "Cloud sync not configured.";
+      render();
+      return;
+    }
+
+    const { createClient } = await import(SUPABASE_MODULE_URL);
+    supabaseClient = createClient(config.supabaseUrl, config.supabaseAnonKey);
+
+    const sessionResult = await supabaseClient.auth.getSession();
+    const session = sessionResult.data?.session || null;
+
+    authChangeSubscription?.unsubscribe?.();
+    const authListener = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
+      applyAuthSession(nextSession, { mergeLocal: true }).catch((error) => {
+        console.error(error);
+        state.auth.message = "Cloud sync failed.";
+        render();
+      });
+    });
+    authChangeSubscription = authListener.data?.subscription || null;
+
+    await applyAuthSession(session, { mergeLocal: true });
+  } catch (error) {
+    console.error(error);
+    state.auth.status = "disabled";
+    state.auth.message = "Cloud sync unavailable.";
+    render();
+  }
+}
+
+async function signInToCloud() {
+  if (!supabaseClient || state.auth.busy) {
+    return;
+  }
+
+  const email = state.auth.email.trim();
+  const password = state.auth.password;
+  if (!email || !password) {
+    state.auth.message = "Enter email and password.";
+    render();
+    return;
+  }
+
+  state.auth.busy = true;
+  state.auth.message = "Signing in...";
+  render();
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  state.auth.busy = false;
+
+  if (error) {
+    state.auth.message = error.message || "Sign in failed.";
+    render();
+  }
+}
+
+async function createCloudAccount() {
+  if (!supabaseClient || state.auth.busy) {
+    return;
+  }
+
+  const email = state.auth.email.trim();
+  const password = state.auth.password;
+  if (!email || password.length < 6) {
+    state.auth.message = "Use an email and a 6+ character password.";
+    render();
+    return;
+  }
+
+  state.auth.busy = true;
+  state.auth.message = "Creating account...";
+  render();
+
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  state.auth.busy = false;
+
+  if (error) {
+    state.auth.message = error.message || "Account creation failed.";
+    render();
+    return;
+  }
+
+  if (!data.session) {
+    state.auth.message = "Check your email, then sign in.";
+    state.auth.password = "";
+    render();
+  }
+}
+
+async function signOutFromCloud() {
+  if (!supabaseClient || state.auth.busy) {
+    return;
+  }
+
+  state.auth.busy = true;
+  state.auth.message = "Signing out...";
+  render();
+
+  const { error } = await supabaseClient.auth.signOut();
+  state.auth.busy = false;
+
+  if (error) {
+    state.auth.message = error.message || "Sign out failed.";
+    render();
+  }
+}
+
 function escapeHtml(value) {
   return value
     .replaceAll("&", "&amp;")
@@ -328,6 +591,96 @@ function renderLoadedTrack() {
       <strong>${escapeHtml(state.title || "Untitled song")}</strong>
       <em>${escapeHtml(state.artist || "Unknown artist")}</em>
     </div>
+  `;
+}
+
+function renderAuthPanel() {
+  if (state.auth.status === "loading") {
+    return `
+      <section class="auth-panel" aria-label="Account">
+        <div class="auth-heading">
+          <div>
+            <h2>Account</h2>
+            <p>Checking sync...</p>
+          </div>
+          <span class="saved-language">Sync</span>
+        </div>
+      </section>
+    `;
+  }
+
+  if (state.auth.status === "disabled") {
+    return `
+      <section class="auth-panel" aria-label="Account">
+        <div class="auth-heading">
+          <div>
+            <h2>Account</h2>
+            <p>${escapeHtml(state.auth.message || "Local saves only.")}</p>
+          </div>
+          <span class="saved-language">Local</span>
+        </div>
+      </section>
+    `;
+  }
+
+  if (state.auth.status === "signed-in") {
+    return `
+      <section class="auth-panel" aria-label="Account">
+        <div class="auth-heading">
+          <div>
+            <h2>Account</h2>
+            <p>${escapeHtml(state.auth.email || "Signed in")}</p>
+          </div>
+          <span class="saved-language">Synced</span>
+        </div>
+        <button class="secondary-action" type="button" data-action="auth-sign-out" ${state.auth.busy ? "disabled" : ""}>
+          <span>${state.auth.busy ? "Signing out" : "Sign out"}</span>
+        </button>
+        ${state.auth.message ? `<p class="auth-message">${escapeHtml(state.auth.message)}</p>` : ""}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="auth-panel" aria-label="Account">
+      <div class="auth-heading">
+        <div>
+          <h2>Account</h2>
+          <p>Sync saved songs across devices.</p>
+        </div>
+        <span class="saved-language">Cloud</span>
+      </div>
+      <div class="auth-fields">
+        <label>
+          <span>Email</span>
+          <input
+            value="${escapeHtml(state.auth.email)}"
+            data-auth-field="email"
+            type="email"
+            autocomplete="email"
+            autocapitalize="off"
+          />
+        </label>
+        <label>
+          <span>Password</span>
+          <input
+            value="${escapeHtml(state.auth.password)}"
+            data-auth-field="password"
+            type="password"
+            autocomplete="current-password"
+          />
+        </label>
+      </div>
+      <div class="auth-actions">
+        <button class="secondary-action" type="button" data-action="auth-sign-in" ${state.auth.busy ? "disabled" : ""}>
+          <span>${state.auth.busy ? "Signing in" : "Sign in"}</span>
+        </button>
+        <button class="secondary-action ghost-action" type="button" data-action="auth-sign-up" ${state.auth.busy ? "disabled" : ""}>
+          <span>Create account</span>
+        </button>
+      </div>
+      ${state.auth.message ? `<p class="auth-message">${escapeHtml(state.auth.message)}</p>` : ""}
+    </section>
   `;
 }
 
@@ -469,6 +822,49 @@ function refreshOutputPanel() {
     });
   }
   refreshStatus();
+  bindContainedScrollAreas();
+}
+
+function containScrollDelta(event, element, deltaY) {
+  const maxScrollTop = element.scrollHeight - element.clientHeight;
+
+  if (maxScrollTop <= 1 || deltaY === 0) {
+    return;
+  }
+
+  const nextScrollTop = element.scrollTop + deltaY;
+
+  if (nextScrollTop < 0 || nextScrollTop > maxScrollTop) {
+    element.scrollTop = Math.min(maxScrollTop, Math.max(0, nextScrollTop));
+    event.preventDefault();
+  }
+
+  event.stopPropagation();
+}
+
+function handleContainedWheel(event) {
+  containScrollDelta(event, event.currentTarget, event.deltaY);
+}
+
+function handleContainedTouchStart(event) {
+  touchStartByElement.set(event.currentTarget, event.touches[0]?.clientY || 0);
+}
+
+function handleContainedTouchMove(event) {
+  const element = event.currentTarget;
+  const currentY = event.touches[0]?.clientY || 0;
+  const previousY = touchStartByElement.get(element) || currentY;
+
+  touchStartByElement.set(element, currentY);
+  containScrollDelta(event, element, previousY - currentY);
+}
+
+function bindContainedScrollAreas() {
+  root.querySelectorAll(containedScrollSelector).forEach((element) => {
+    element.addEventListener("wheel", handleContainedWheel, { passive: false });
+    element.addEventListener("touchstart", handleContainedTouchStart, { passive: true });
+    element.addEventListener("touchmove", handleContainedTouchMove, { passive: false });
+  });
 }
 
 function clearSearchResultsView() {
@@ -517,6 +913,7 @@ function renderMenu() {
         </button>
       </section>
 
+      ${renderAuthPanel()}
       ${renderSavedSongs()}
     </main>
   `;
@@ -660,15 +1057,13 @@ function renderSearchScreen() {
 function render() {
   if (state.screen === "menu") {
     renderMenu();
-    return;
-  }
-
-  if (state.screen === "detail") {
+  } else if (state.screen === "detail") {
     renderSavedDetail();
-    return;
+  } else {
+    renderSearchScreen();
   }
 
-  renderSearchScreen();
+  bindContainedScrollAreas();
 }
 
 function setMessage(message) {
@@ -874,7 +1269,7 @@ function getSavedTranslationKey(item) {
   });
 }
 
-function saveCurrentTranslation() {
+async function saveCurrentTranslation() {
   const lyricLines = splitLyrics(state.lyrics);
   if (!lyricLines.length) {
     setMessage("No lyrics yet.");
@@ -904,13 +1299,21 @@ function saveCurrentTranslation() {
   const existingIndex = state.savedTranslations.findIndex((item) => getSavedTranslationKey(item) === savedKey);
 
   if (existingIndex >= 0) {
+    savedItem.id = state.savedTranslations[existingIndex].id;
     state.savedTranslations.splice(existingIndex, 1);
   }
 
   state.savedTranslations.unshift(savedItem);
   state.savedTranslations = state.savedTranslations.slice(0, maxSavedTranslations);
   saveSavedTranslations();
-  setMessage("Saved translation.");
+
+  if (isCloudSyncReady()) {
+    const synced = await syncSavedTranslation(savedItem);
+    setMessage(synced ? "Saved and synced." : "Saved on this device.");
+    return;
+  }
+
+  setMessage(state.auth.status === "signed-out" ? "Saved on this device. Sign in to sync." : "Saved translation.");
 }
 
 function showMenu() {
@@ -959,17 +1362,25 @@ function openSavedTranslation(index) {
   render();
 }
 
-function deleteSavedTranslation(index) {
+async function deleteSavedTranslation(index) {
   if (!state.savedTranslations[index]) {
     return;
   }
 
-  state.savedTranslations.splice(index, 1);
+  const [removedItem] = state.savedTranslations.splice(index, 1);
   saveSavedTranslations();
+  await deleteCloudSavedTranslation(removedItem);
   setMessage("Removed saved translation.");
 }
 
 function handleInput(event) {
+  const authField = event.target.dataset.authField;
+  if (authField) {
+    state.auth[authField] = event.target.value;
+    state.auth.message = "";
+    return;
+  }
+
   const field = event.target.dataset.field;
   if (!field) {
     return;
@@ -1129,15 +1540,29 @@ function handleClick(event) {
   if (action === "delete-saved") {
     deleteSavedTranslation(Number(button.dataset.index));
   }
+
+  if (action === "auth-sign-in") {
+    signInToCloud();
+  }
+
+  if (action === "auth-sign-up") {
+    createCloudAccount();
+  }
+
+  if (action === "auth-sign-out") {
+    signOutFromCloud();
+  }
 }
 
-loadDraft();
-loadSavedTranslations();
-render();
 root.addEventListener("input", handleInput);
 root.addEventListener("compositionstart", handleCompositionStart);
 root.addEventListener("compositionend", handleCompositionEnd);
 root.addEventListener("click", handleClick);
+
+loadDraft();
+loadSavedTranslations();
+render();
+initializeCloudSync();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

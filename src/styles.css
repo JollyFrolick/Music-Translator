@@ -338,6 +338,58 @@ button {
   white-space: nowrap;
 }
 
+.auth-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 13px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.82);
+}
+
+.auth-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-heading h2,
+.auth-heading p,
+.auth-message {
+  margin: 0;
+}
+
+.auth-heading h2 {
+  color: var(--teal-dark);
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.auth-heading p,
+.auth-message {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.auth-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auth-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ghost-action {
+  color: var(--ink);
+  background: var(--paper-strong);
+}
+
 .saved-section {
   display: grid;
   gap: 10px;
@@ -345,7 +397,7 @@ button {
 }
 
 .menu-saved-section {
-  margin-top: 20px;
+  margin-top: 14px;
 }
 
 .saved-heading {
@@ -482,10 +534,16 @@ input {
 }
 
 textarea {
+  height: min(52svh, 520px);
   min-height: 420px;
+  max-height: min(62svh, 640px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   resize: vertical;
   padding: 13px;
   line-height: 1.55;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 input:focus,
@@ -495,6 +553,7 @@ textarea:focus {
 }
 
 .lyrics-box {
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -629,7 +688,12 @@ textarea:focus {
 .line-list {
   display: grid;
   gap: 10px;
+  max-height: min(64svh, 720px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 14px;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .lyric-card {
@@ -860,6 +924,11 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .auth-fields,
+  .auth-actions {
+    grid-template-columns: 1fr;
+  }
+
   .custom-meta-box {
     grid-template-columns: 1fr;
   }
@@ -869,11 +938,17 @@ textarea:focus {
   }
 
   textarea {
+    height: min(48svh, 420px);
     min-height: 300px;
   }
 
   .custom-lyrics-box textarea {
+    height: min(46svh, 380px);
     min-height: 240px;
+  }
+
+  .line-list {
+    max-height: 58svh;
   }
 }
 
