@@ -61,6 +61,18 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 
 After redeploying, the app shows an Account panel on the home screen. Sign in on your phone and laptop to share the same saved-song library.
 
+For this deployment, configure Supabase email confirmation redirects with:
+
+```txt
+Site URL:
+https://music-translator-nine.vercel.app
+
+Redirect URLs:
+https://music-translator-nine.vercel.app/**
+```
+
+If email confirmation links say the site cannot be reached, check that the Supabase Site URL points to the deployed Vercel domain.
+
 ### Other Node Hosts
 
 You can still use a Node web service host such as Render, Railway, or Fly.io. For Render, connect this repo and use:
