@@ -1,4 +1,4 @@
-const CACHE_NAME = "lyric-lens-v16";
+const CACHE_NAME = "lyric-lens-v17";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

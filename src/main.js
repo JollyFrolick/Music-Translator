@@ -17,6 +17,7 @@ const sampleLyrics = `月亮代表我的心
 
 const state = {
   screen: "menu",
+  accountReturnScreen: "menu",
   language: "mandarin",
   searchMode: "song",
   searchQuery: "",
@@ -966,6 +967,8 @@ function clearSearchResultsView() {
 }
 
 function renderTopbar({ subtitle = `${romanizationLabel()} and English`, statusText = getStatusText(), statusIcon = getStatusIcon() } = {}) {
+  const accountTitle = `Account: ${getPlanLabel()}`;
+
   return `
     <header class="topbar">
       <div class="brand">
@@ -976,11 +979,91 @@ function renderTopbar({ subtitle = `${romanizationLabel()} and English`, statusT
         </div>
       </div>
 
-      <div class="status-strip" role="status">
-        <span class="status-icon">${escapeHtml(statusIcon)}</span>
-        <span class="status-text">${escapeHtml(statusText)}</span>
+      <div class="topbar-actions">
+        <div class="status-strip" role="status">
+          <span class="status-icon">${escapeHtml(statusIcon)}</span>
+          <span class="status-text">${escapeHtml(statusText)}</span>
+        </div>
+        <button
+          class="icon-button account-icon-button${state.screen === "account" ? " active" : ""}"
+          type="button"
+          data-action="account"
+          title="${escapeHtml(accountTitle)}"
+          aria-label="${escapeHtml(accountTitle)}"
+        >
+          <span class="account-glyph" aria-hidden="true"></span>
+        </button>
       </div>
     </header>
+  `;
+}
+
+function getAccountBackLabel() {
+  if (state.accountReturnScreen === "search") {
+    return "Lyrics";
+  }
+
+  if (state.accountReturnScreen === "detail") {
+    return "Saved Song";
+  }
+
+  return "Main Menu";
+}
+
+function renderAccountPage() {
+  const planLabel = getPlanLabel();
+  const planDescription = isPremiumPlan()
+    ? "Premium account with unlimited saved translations."
+    : `Free account with up to ${FREE_SAVE_LIMIT} saved translations.`;
+  const syncStatus =
+    state.auth.status === "signed-in"
+      ? state.auth.email || "Signed in"
+      : state.auth.status === "signed-out"
+        ? "Not signed in"
+        : state.auth.status === "loading"
+          ? "Checking sync"
+          : state.auth.message || "Local saves only";
+
+  root.innerHTML = `
+    <main class="app-shell account-shell">
+      ${renderTopbar({
+        subtitle: "Account",
+        statusText: `${planLabel} account`,
+        statusIcon: "i"
+      })}
+
+      <section class="toolbar" aria-label="Account navigation">
+        <button class="secondary-action home-action" type="button" data-action="account-back">
+          <span class="button-icon">←</span>
+          <span>${escapeHtml(getAccountBackLabel())}</span>
+        </button>
+      </section>
+
+      <section class="account-page" aria-label="Account details">
+        <section class="account-summary">
+          <div class="account-summary-heading">
+            <div>
+              <h2>Account Type</h2>
+              <p>${escapeHtml(planDescription)}</p>
+            </div>
+            <span class="account-plan-badge">${escapeHtml(planLabel)}</span>
+          </div>
+
+          <div class="account-detail-list">
+            <div class="account-detail-row">
+              <span>Status</span>
+              <strong>${escapeHtml(syncStatus)}</strong>
+            </div>
+            <div class="account-detail-row">
+              <span>Saved songs</span>
+              <strong>${escapeHtml(getSavedUsageText())}</strong>
+            </div>
+          </div>
+        </section>
+
+        ${renderAuthPanel()}
+      </section>
+    </main>
   `;
 }
 
@@ -1150,6 +1233,8 @@ function render() {
     renderMenu();
   } else if (state.screen === "detail") {
     renderSavedDetail();
+  } else if (state.screen === "account") {
+    renderAccountPage();
   } else {
     renderSearchScreen();
   }
@@ -1415,6 +1500,25 @@ async function saveCurrentTranslation() {
 function showMenu() {
   cancelAutoTranslate({ abort: true });
   state.screen = "menu";
+  state.accountReturnScreen = "menu";
+  state.message = "";
+  render();
+}
+
+function showAccount() {
+  if (state.screen !== "account") {
+    state.accountReturnScreen = ["menu", "search", "detail"].includes(state.screen) ? state.screen : "menu";
+  }
+
+  state.screen = "account";
+  state.message = "";
+  render();
+}
+
+function returnFromAccount() {
+  state.screen = ["menu", "search", "detail"].includes(state.accountReturnScreen)
+    ? state.accountReturnScreen
+    : "menu";
   state.message = "";
   render();
 }
@@ -1546,6 +1650,14 @@ function handleClick(event) {
 
   if (action === "menu") {
     showMenu();
+  }
+
+  if (action === "account") {
+    showAccount();
+  }
+
+  if (action === "account-back") {
+    returnFromAccount();
   }
 
   if (action === "start-search") {
