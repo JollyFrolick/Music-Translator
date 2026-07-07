@@ -61,6 +61,23 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 
 After redeploying, the app shows an Account panel on the home screen. Sign in on your phone and laptop to share the same saved-song library.
 
+Free accounts can save up to 5 songs. Premium accounts can save without an app-level limit. To mark a signed-in user as premium, copy their user ID from Supabase Authentication -> Users, then run:
+
+```sql
+insert into public.profiles (user_id, plan)
+values ('user-uuid-here', 'premium')
+on conflict (user_id)
+do update set plan = 'premium', updated_at = now();
+```
+
+To move an account back to the free tier:
+
+```sql
+update public.profiles
+set plan = 'free', updated_at = now()
+where user_id = 'user-uuid-here';
+```
+
 For this deployment, configure Supabase email confirmation redirects with:
 
 ```txt

@@ -4,8 +4,9 @@ import ToJyutping from "https://esm.sh/to-jyutping@3.1.1";
 const STORAGE_KEY = "lyric-lens-draft";
 const SAVED_TRANSLATIONS_KEY = "lyric-lens-saved-translations";
 const CLOUD_TABLE = "saved_translations";
+const PROFILE_TABLE = "profiles";
 const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2";
-const maxSavedTranslations = 30;
+const FREE_SAVE_LIMIT = 5;
 const sampleLyrics = `月亮代表我的心
 你问我爱你有多深
 我爱你有几分
@@ -32,6 +33,7 @@ const state = {
     user: null,
     email: "",
     password: "",
+    plan: "free",
     message: "",
     busy: false
   }
@@ -221,7 +223,7 @@ function loadSavedTranslations() {
   try {
     const items = JSON.parse(saved);
     state.savedTranslations = Array.isArray(items)
-      ? items.map(normalizeSavedTranslation).filter(Boolean).slice(0, maxSavedTranslations)
+      ? dedupeSavedTranslations(items, { applyLimit: false })
       : [];
   } catch {
     localStorage.removeItem(SAVED_TRANSLATIONS_KEY);
@@ -237,9 +239,22 @@ function isCloudSyncReady() {
   return Boolean(supabaseClient && state.auth.status === "signed-in" && state.auth.user?.id);
 }
 
-function dedupeSavedTranslations(items) {
+function isPremiumPlan() {
+  return state.auth.plan === "premium";
+}
+
+function getSavedTranslationLimit() {
+  return isPremiumPlan() ? null : FREE_SAVE_LIMIT;
+}
+
+function limitSavedTranslations(items) {
+  const limit = getSavedTranslationLimit();
+  return typeof limit === "number" ? items.slice(0, limit) : items;
+}
+
+function dedupeSavedTranslations(items, { applyLimit = true } = {}) {
   const seen = new Set();
-  return items
+  const deduped = items
     .map(normalizeSavedTranslation)
     .filter(Boolean)
     .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime())
@@ -250,8 +265,49 @@ function dedupeSavedTranslations(items) {
       }
       seen.add(key);
       return true;
-    })
-    .slice(0, maxSavedTranslations);
+    });
+
+  return applyLimit ? limitSavedTranslations(deduped) : deduped;
+}
+
+function enforceSavedTranslationLimit() {
+  const limitedItems = dedupeSavedTranslations(state.savedTranslations);
+  const changed =
+    limitedItems.length !== state.savedTranslations.length ||
+    limitedItems.some((item, index) => item.id !== state.savedTranslations[index]?.id);
+
+  state.savedTranslations = limitedItems;
+
+  if (changed) {
+    saveSavedTranslations();
+  }
+
+  return changed;
+}
+
+function canAddSavedTranslation() {
+  const limit = getSavedTranslationLimit();
+  return typeof limit !== "number" || state.savedTranslations.length < limit;
+}
+
+function getSavedUsageText(count = state.savedTranslations.length) {
+  const limit = getSavedTranslationLimit();
+  if (typeof limit === "number") {
+    return `${count}/${limit} saved`;
+  }
+  return count ? `${count} saved` : "No saved songs";
+}
+
+function getPlanLabel() {
+  return isPremiumPlan() ? "Premium" : "Free";
+}
+
+function getSaveLimitMessage() {
+  if (state.auth.status === "signed-out") {
+    return `Free plan allows ${FREE_SAVE_LIMIT} saves. Sign in with a premium account for unlimited saves.`;
+  }
+
+  return `Free plan allows ${FREE_SAVE_LIMIT} saves. Premium removes the save limit.`;
 }
 
 function savedItemToCloudRow(item) {
@@ -303,6 +359,27 @@ async function syncSavedTranslation(savedItem, { silent = false } = {}) {
   return true;
 }
 
+async function loadAccountPlan(user) {
+  state.auth.plan = "free";
+
+  if (!supabaseClient || !user?.id) {
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from(PROFILE_TABLE)
+    .select("plan")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  state.auth.plan = data?.plan === "premium" ? "premium" : "free";
+}
+
 async function deleteCloudSavedTranslation(savedItem) {
   if (!isCloudSyncReady() || !savedItem?.id) {
     return;
@@ -324,8 +401,7 @@ async function loadCloudSavedTranslations({ mergeLocal = false } = {}) {
   const { data, error } = await supabaseClient
     .from(CLOUD_TABLE)
     .select("id,saved_at,language,search_mode,search_query,title,artist,lyrics,translations")
-    .order("saved_at", { ascending: false })
-    .limit(maxSavedTranslations);
+    .order("saved_at", { ascending: false });
 
   if (error) {
     console.error(error);
@@ -337,12 +413,14 @@ async function loadCloudSavedTranslations({ mergeLocal = false } = {}) {
   const cloudItems = Array.isArray(data) ? data.map(cloudRowToSavedItem).filter(Boolean) : [];
   const cloudKeys = new Set(cloudItems.map(getSavedTranslationKey));
   const unsyncedLocalItems = localItems.filter((item) => !cloudKeys.has(getSavedTranslationKey(item)));
+  const nextItems = dedupeSavedTranslations([...unsyncedLocalItems, ...cloudItems]);
+  const nextKeys = new Set(nextItems.map(getSavedTranslationKey));
 
-  for (const item of unsyncedLocalItems) {
+  for (const item of unsyncedLocalItems.filter((item) => nextKeys.has(getSavedTranslationKey(item)))) {
     await syncSavedTranslation(item, { silent: true });
   }
 
-  state.savedTranslations = dedupeSavedTranslations([...unsyncedLocalItems, ...cloudItems]);
+  state.savedTranslations = nextItems;
   saveSavedTranslations();
   render();
 }
@@ -354,6 +432,7 @@ async function applyAuthSession(session, { mergeLocal = false } = {}) {
     state.auth.email = session.user.email || state.auth.email;
     state.auth.password = "";
     state.auth.message = "Cloud sync on.";
+    await loadAccountPlan(session.user);
     await loadCloudSavedTranslations({ mergeLocal });
     return;
   }
@@ -361,7 +440,9 @@ async function applyAuthSession(session, { mergeLocal = false } = {}) {
   state.auth.status = supabaseClient ? "signed-out" : "disabled";
   state.auth.user = null;
   state.auth.password = "";
+  state.auth.plan = "free";
   state.auth.message = "";
+  enforceSavedTranslationLimit();
   render();
 }
 
@@ -375,7 +456,9 @@ async function initializeCloudSync() {
 
     if (!response.ok || !config.cloudSyncEnabled) {
       state.auth.status = "disabled";
+      state.auth.plan = "free";
       state.auth.message = "Cloud sync not configured.";
+      enforceSavedTranslationLimit();
       render();
       return;
     }
@@ -400,7 +483,9 @@ async function initializeCloudSync() {
   } catch (error) {
     console.error(error);
     state.auth.status = "disabled";
+    state.auth.plan = "free";
     state.auth.message = "Cloud sync unavailable.";
+    enforceSavedTranslationLimit();
     render();
   }
 }
@@ -617,7 +702,7 @@ function renderAuthPanel() {
             <h2>Account</h2>
             <p>${escapeHtml(state.auth.message || "Local saves only.")}</p>
           </div>
-          <span class="saved-language">Local</span>
+          <span class="saved-language">${getPlanLabel()}</span>
         </div>
       </section>
     `;
@@ -631,7 +716,7 @@ function renderAuthPanel() {
             <h2>Account</h2>
             <p>${escapeHtml(state.auth.email || "Signed in")}</p>
           </div>
-          <span class="saved-language">Synced</span>
+          <span class="saved-language">${getPlanLabel()}</span>
         </div>
         <button class="secondary-action" type="button" data-action="auth-sign-out" ${state.auth.busy ? "disabled" : ""}>
           <span>${state.auth.busy ? "Signing out" : "Sign out"}</span>
@@ -648,7 +733,7 @@ function renderAuthPanel() {
           <h2>Account</h2>
           <p>Sync saved songs across devices.</p>
         </div>
-        <span class="saved-language">Cloud</span>
+        <span class="saved-language">${getPlanLabel()}</span>
       </div>
       <div class="auth-fields">
         <label>
@@ -694,14 +779,16 @@ function savedSongArtist(item) {
 
 function renderSavedSongs() {
   const count = state.savedTranslations.length;
+  const savedUsageText = getSavedUsageText(count);
 
   return `
     <section class="saved-section menu-saved-section" aria-label="Saved songs">
       <div class="saved-heading">
         <div>
           <h2>Saved Songs</h2>
-          <p>${count ? `${count} saved` : "No saved songs"}</p>
+          <p>${escapeHtml(savedUsageText)}</p>
         </div>
+        <span class="saved-language">${getPlanLabel()}</span>
       </div>
 
       ${
@@ -747,12 +834,16 @@ function renderLanguageControls() {
 }
 
 function renderSearchActions() {
+  const saveTitle = isPremiumPlan()
+    ? "Save translation"
+    : `Save translation (${state.savedTranslations.length}/${FREE_SAVE_LIMIT})`;
+
   return `
     <div class="panel-actions" aria-label="Lyric controls">
       <div class="actions search-actions">
         <button class="icon-button" type="button" data-action="menu" title="Main menu" aria-label="Main menu">←</button>
         <button class="icon-button" type="button" data-action="sample" title="Load sample" aria-label="Load sample">↻</button>
-        <button class="icon-button save-action" type="button" data-action="save" title="Save translation" aria-label="Save translation">Save</button>
+        <button class="icon-button save-action" type="button" data-action="save" title="${escapeHtml(saveTitle)}" aria-label="${escapeHtml(saveTitle)}">Save</button>
         <button class="icon-button" type="button" data-action="copy" title="Copy result" aria-label="Copy result">⧉</button>
         <button class="icon-button" type="button" data-action="download" title="Download result" aria-label="Download result">↓</button>
         <button class="icon-button danger" type="button" data-action="clear" title="Clear lyrics" aria-label="Clear lyrics">×</button>
@@ -900,7 +991,7 @@ function renderMenu() {
     <main class="app-shell menu-shell">
       ${renderTopbar({
         subtitle: "Saved songs",
-        statusText: savedCount ? `${savedCount} saved` : "No saved songs",
+        statusText: getSavedUsageText(savedCount),
         statusIcon: "#"
       })}
 
@@ -1298,13 +1389,18 @@ async function saveCurrentTranslation() {
   const savedKey = getSavedTranslationKey(savedItem);
   const existingIndex = state.savedTranslations.findIndex((item) => getSavedTranslationKey(item) === savedKey);
 
+  if (existingIndex < 0 && !canAddSavedTranslation()) {
+    setMessage(getSaveLimitMessage());
+    return;
+  }
+
   if (existingIndex >= 0) {
     savedItem.id = state.savedTranslations[existingIndex].id;
     state.savedTranslations.splice(existingIndex, 1);
   }
 
   state.savedTranslations.unshift(savedItem);
-  state.savedTranslations = state.savedTranslations.slice(0, maxSavedTranslations);
+  state.savedTranslations = dedupeSavedTranslations(state.savedTranslations);
   saveSavedTranslations();
 
   if (isCloudSyncReady()) {
