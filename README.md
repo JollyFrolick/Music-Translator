@@ -33,6 +33,7 @@ This repo is ready for Vercel. Import the GitHub repo in Vercel and use:
 ```txt
 Framework Preset: Other
 Build Command: npm run build
+Output Directory: dist
 ```
 
 The browser app is served as static files, and these Vercel Functions handle server-only work:

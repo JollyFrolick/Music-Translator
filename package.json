@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
-    "build": "node server.mjs --check",
+    "build": "node scripts/build.mjs",
     "preview": "NODE_ENV=production npm start"
   }
 }
