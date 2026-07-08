@@ -26,6 +26,8 @@ const state = {
   lyrics: sampleLyrics,
   translations: [],
   savedTranslations: [],
+  currentSavedTranslationId: "",
+  isEditingSavedTranslation: false,
   searchResults: [],
   searchMeta: null,
   message: "",
@@ -820,6 +822,7 @@ function renderSavedSongs() {
                         </span>
                         <span class="saved-language">${escapeHtml(languageName(item.language))}</span>
                       </button>
+                      <button class="saved-edit" type="button" data-action="edit-saved-list" data-index="${index}" title="Edit saved song" aria-label="Edit saved song">Edit</button>
                       <button class="saved-delete" type="button" data-action="delete-saved" data-index="${index}" title="Remove saved song" aria-label="Remove saved song">×</button>
                     </article>
                   `;
@@ -864,7 +867,12 @@ function renderSearchActions() {
   `;
 }
 
-function renderOutputPanel({ showLanguageControls = false, showSearchActions = false } = {}) {
+function renderOutputPanel({
+  showLanguageControls = false,
+  showSearchActions = false,
+  editableTranslations = false,
+  showEditHeadingAction = false
+} = {}) {
   const lines = getLines();
   const label = romanizationLabel();
   const translationPlaceholder = isTranslating ? "Translating..." : "Translation pending";
@@ -878,7 +886,11 @@ function renderOutputPanel({ showLanguageControls = false, showSearchActions = f
         <h2>Lines</h2>
         <p>${label}</p>
       </div>
-      <span class="heading-icon">Aa</span>
+      ${
+        showEditHeadingAction
+          ? `<button class="heading-edit-button" type="button" data-action="edit-saved" title="Edit saved song" aria-label="Edit saved song">Edit</button>`
+          : `<span class="heading-icon">Aa</span>`
+      }
     </div>
 
     ${
@@ -887,12 +899,24 @@ function renderOutputPanel({ showLanguageControls = false, showSearchActions = f
             ${lines
               .map(
                 (line, index) => `
-                  <article class="lyric-card">
+                  <article class="lyric-card${editableTranslations ? " editable-lyric-card" : ""}">
                     <div class="line-number">${String(index + 1).padStart(2, "0")}</div>
                     <div class="line-content">
                       <p class="original">${escapeHtml(line.original)}</p>
                       <p class="romanization">${escapeHtml(line.romanization)}</p>
-                      <p class="${line.english ? "english" : "english muted"}">${escapeHtml(line.english || translationPlaceholder)}</p>
+                      ${
+                        editableTranslations
+                          ? `<label class="translation-edit">
+                              <span>English</span>
+                              <textarea
+                                data-translation-index="${index}"
+                                spellcheck="true"
+                                autocapitalize="sentences"
+                                placeholder="${escapeHtml(translationPlaceholder)}"
+                              >${escapeHtml(line.english)}</textarea>
+                            </label>`
+                          : `<p class="${line.english ? "english" : "english muted"}">${escapeHtml(line.english || translationPlaceholder)}</p>`
+                      }
                     </div>
                   </article>
                 `
@@ -919,9 +943,12 @@ function refreshStatus() {
 function refreshOutputPanel() {
   const outputPanel = root.querySelector(".output-panel");
   if (outputPanel) {
+    const isSavedEdit = state.screen === "detail" && state.isEditingSavedTranslation;
     outputPanel.innerHTML = renderOutputPanel({
-      showLanguageControls: state.screen === "search",
-      showSearchActions: state.screen === "search"
+      showLanguageControls: state.screen === "search" || isSavedEdit,
+      showSearchActions: state.screen === "search",
+      editableTranslations: isSavedEdit,
+      showEditHeadingAction: state.screen === "detail" && !state.isEditingSavedTranslation
     });
   }
   refreshStatus();
@@ -1270,8 +1297,48 @@ function renderMenu() {
   `;
 }
 
+function renderSavedEditForm() {
+  return `
+    <div class="input-panel saved-edit-panel">
+      <div class="custom-meta-box">
+        <label>
+          <span>Song name</span>
+          <input
+            value="${escapeHtml(state.title)}"
+            data-field="title"
+            autocomplete="off"
+            autocapitalize="off"
+            placeholder=""
+          />
+        </label>
+        <label>
+          <span>Artist</span>
+          <input
+            value="${escapeHtml(state.artist)}"
+            data-field="artist"
+            autocomplete="off"
+            autocapitalize="off"
+            placeholder=""
+          />
+        </label>
+      </div>
+
+      <label class="lyrics-box saved-edit-lyrics">
+        <span>Lyrics</span>
+        <textarea
+          data-field="lyrics"
+          spellcheck="false"
+          autocapitalize="off"
+          placeholder="Paste your lyrics here"
+        >${escapeHtml(state.lyrics)}</textarea>
+      </label>
+    </div>
+  `;
+}
+
 function renderSavedDetail() {
   const title = state.title || splitLyrics(state.lyrics)[0] || "Saved song";
+  const isEditing = state.isEditingSavedTranslation;
   const detailSubtitle = [title, state.artist, languageName(state.language)].filter(Boolean).join(" · ");
 
   root.innerHTML = `
@@ -1287,15 +1354,28 @@ function renderSavedDetail() {
           <span>Saved Songs</span>
         </button>
 
-        <div class="actions compact-actions">
-          <button class="icon-button" type="button" data-action="copy" title="Copy result" aria-label="Copy result">⧉</button>
-          <button class="icon-button" type="button" data-action="download" title="Download result" aria-label="Download result">↓</button>
-        </div>
+        ${
+          isEditing
+            ? `<div class="actions compact-actions saved-detail-actions">
+                <button class="secondary-action edit-action save-edit-action" type="button" data-action="save-saved-edit">
+                  <span>Save changes</span>
+                </button>
+                <button class="secondary-action ghost-action edit-action" type="button" data-action="cancel-saved-edit">
+                  <span>Cancel</span>
+                </button>
+              </div>`
+            : ""
+        }
       </section>
 
-      <section class="detail-workspace">
+      <section class="${isEditing ? "detail-workspace saved-edit-workspace" : "detail-workspace"}">
+        ${isEditing ? renderSavedEditForm() : ""}
         <div class="output-panel" aria-label="Translated lyrics">
-          ${renderOutputPanel()}
+          ${renderOutputPanel({
+            showLanguageControls: isEditing,
+            editableTranslations: isEditing,
+            showEditHeadingAction: !isEditing
+          })}
         </div>
       </section>
     </main>
@@ -1680,6 +1760,8 @@ function showMenu() {
   cancelAutoTranslate({ abort: true });
   state.screen = "menu";
   state.accountReturnScreen = "menu";
+  state.currentSavedTranslationId = "";
+  state.isEditingSavedTranslation = false;
   state.message = "";
   render();
 }
@@ -1750,9 +1832,15 @@ async function refreshAccountPlan() {
   render();
 }
 
+function findSavedTranslationIndexById(id = state.currentSavedTranslationId) {
+  return state.savedTranslations.findIndex((item) => item.id === id);
+}
+
 function startSearch(mode) {
   cancelAutoTranslate({ abort: true });
   state.screen = "search";
+  state.currentSavedTranslationId = "";
+  state.isEditingSavedTranslation = false;
   state.searchMode = ["artist", "custom"].includes(mode) ? mode : "song";
   state.searchQuery = "";
   state.title = "";
@@ -1775,6 +1863,8 @@ function openSavedTranslation(index) {
   const lyricLines = splitLyrics(savedItem.lyrics);
   cancelAutoTranslate({ abort: true });
   state.screen = "detail";
+  state.currentSavedTranslationId = savedItem.id;
+  state.isEditingSavedTranslation = false;
   state.language = savedItem.language;
   state.searchMode = savedItem.searchMode;
   state.searchQuery = savedItem.searchQuery || savedItem.title || "";
@@ -1787,6 +1877,96 @@ function openSavedTranslation(index) {
   state.message = "Saved translation loaded.";
   saveDraft();
   render();
+}
+
+function openSavedTranslationForEdit(index) {
+  openSavedTranslation(index);
+  if (state.screen === "detail") {
+    state.isEditingSavedTranslation = true;
+    state.message = "Editing saved song.";
+    render();
+  }
+}
+
+function editSavedTranslation() {
+  if (findSavedTranslationIndexById() < 0) {
+    setMessage("Saved song not found.");
+    return;
+  }
+
+  state.isEditingSavedTranslation = true;
+  state.message = "Editing saved song.";
+  render();
+}
+
+function cancelSavedTranslationEdit() {
+  const savedIndex = findSavedTranslationIndexById();
+  if (savedIndex < 0) {
+    showMenu();
+    return;
+  }
+
+  openSavedTranslation(savedIndex);
+}
+
+async function saveSavedTranslationEdit() {
+  const savedIndex = findSavedTranslationIndexById();
+  if (savedIndex < 0) {
+    setMessage("Saved song not found.");
+    return;
+  }
+
+  const lyricLines = splitLyrics(state.lyrics);
+  if (!lyricLines.length) {
+    setMessage("No lyrics yet.");
+    return;
+  }
+
+  if (!hasCompleteTranslations(lyricLines)) {
+    if (!isTranslating) {
+      scheduleAutoTranslate(0);
+    }
+    setMessage(isTranslating ? "Wait for translation to finish." : "Translation needed before saving.");
+    return;
+  }
+
+  const previousItem = state.savedTranslations[savedIndex];
+  const updatedItem = {
+    ...previousItem,
+    savedAt: new Date().toISOString(),
+    language: state.language,
+    searchMode: state.searchMode,
+    searchQuery: state.searchQuery,
+    title: state.title.trim(),
+    artist: state.artist.trim(),
+    lyrics: state.lyrics.trim(),
+    translations: normalizeTranslationList(state.translations, lyricLines.length)
+  };
+  const updatedKey = getSavedTranslationKey(updatedItem);
+  const duplicateItems = state.savedTranslations.filter(
+    (item, index) => index !== savedIndex && getSavedTranslationKey(item) === updatedKey
+  );
+
+  state.savedTranslations = state.savedTranslations.filter(
+    (item, index) => index !== savedIndex && getSavedTranslationKey(item) !== updatedKey
+  );
+  state.savedTranslations.unshift(updatedItem);
+  saveSavedTranslations();
+
+  if (isCloudSyncReady()) {
+    for (const item of duplicateItems) {
+      await deleteCloudSavedTranslation(item);
+    }
+    const synced = await syncSavedTranslation(updatedItem);
+    state.isEditingSavedTranslation = false;
+    state.message = synced ? "Saved changes and synced." : "Saved changes on this device.";
+    render();
+    saveDraft();
+    return;
+  }
+
+  state.isEditingSavedTranslation = false;
+  setMessage(state.auth.status === "signed-out" ? "Saved changes on this device. Sign in to sync." : "Saved changes.");
 }
 
 async function deleteSavedTranslation(index) {
@@ -1805,6 +1985,18 @@ function handleInput(event) {
   if (authField) {
     state.auth[authField] = event.target.value;
     state.auth.message = "";
+    return;
+  }
+
+  const translationIndex = event.target.dataset.translationIndex;
+  if (translationIndex !== undefined) {
+    const index = Number(translationIndex);
+    if (Number.isInteger(index) && index >= 0) {
+      state.translations[index] = event.target.value;
+      state.message = "";
+      refreshStatus();
+      saveDraft();
+    }
     return;
   }
 
@@ -1957,6 +2149,18 @@ function handleClick(event) {
     saveCurrentTranslation();
   }
 
+  if (action === "edit-saved") {
+    editSavedTranslation();
+  }
+
+  if (action === "cancel-saved-edit") {
+    cancelSavedTranslationEdit();
+  }
+
+  if (action === "save-saved-edit") {
+    saveSavedTranslationEdit();
+  }
+
   if (action === "clear") {
     cancelAutoTranslate({ abort: true });
     state.searchQuery = "";
@@ -1986,6 +2190,10 @@ function handleClick(event) {
 
   if (action === "open-saved") {
     openSavedTranslation(Number(button.dataset.index));
+  }
+
+  if (action === "edit-saved-list") {
+    openSavedTranslationForEdit(Number(button.dataset.index));
   }
 
   if (action === "delete-saved") {
