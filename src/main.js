@@ -28,6 +28,7 @@ const state = {
   savedTranslations: [],
   currentSavedTranslationId: "",
   isEditingSavedTranslation: false,
+  pendingDeleteSavedTranslationId: "",
   searchResults: [],
   searchMeta: null,
   message: "",
@@ -835,6 +836,36 @@ function renderSavedSongs() {
   `;
 }
 
+function renderDeleteConfirmationDialog() {
+  const item = state.savedTranslations.find((savedItem) => savedItem.id === state.pendingDeleteSavedTranslationId);
+
+  if (!item) {
+    return "";
+  }
+
+  const title = savedSongTitle(item);
+  const artist = savedSongArtist(item);
+
+  return `
+    <div class="dialog-backdrop" role="presentation">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-song-title">
+        <div class="confirm-dialog-heading">
+          <h2 id="delete-song-title">Delete saved song?</h2>
+          <p>${escapeHtml(title)} by ${escapeHtml(artist)} will be removed from your saved songs.</p>
+        </div>
+        <div class="confirm-dialog-actions">
+          <button class="secondary-action ghost-action" type="button" data-action="cancel-delete-saved">
+            <span>Cancel</span>
+          </button>
+          <button class="secondary-action delete-confirm-action" type="button" data-action="confirm-delete-saved">
+            <span>Delete</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderLanguageControls() {
   return `
     <div class="segmented language-controls" aria-label="Language">
@@ -1033,13 +1064,13 @@ function renderTopbar({
 
   return `
     <header class="topbar">
-      <div class="brand">
+      <button class="brand brand-home-button" type="button" data-action="menu" title="Main menu" aria-label="Main menu">
         <img class="brand-mark" src="/icon.svg" alt="" />
         <div>
           <h1>Lyric Lens</h1>
           <p>${escapeHtml(subtitle)}</p>
         </div>
-      </div>
+      </button>
 
       <div class="topbar-actions">
         ${
@@ -1188,6 +1219,7 @@ function renderPaymentPage() {
   const checkoutUrl = getPremiumCheckoutUrl();
   const isSignedIn = state.auth.status === "signed-in";
   const canCheckout = !isPremium && isSignedIn && Boolean(checkoutUrl);
+  const savedUsageText = getSavedUsageText();
   const checkoutStatus = isPremium
     ? "Premium is active."
     : !checkoutUrl
@@ -1195,6 +1227,13 @@ function renderPaymentPage() {
       : isSignedIn
         ? "Ready for secure checkout."
         : "Sign in before checkout.";
+  const primaryCheckoutLabel = isPremium
+    ? "Premium active"
+    : !isSignedIn
+      ? "Sign in to continue"
+      : checkoutUrl
+        ? "Continue to secure checkout"
+        : "Checkout unavailable";
 
   root.innerHTML = `
     <main class="app-shell payment-shell">
@@ -1217,23 +1256,29 @@ function renderPaymentPage() {
           <div class="premium-summary-heading">
             <div>
               <h2>Premium</h2>
-              <p>Save every translated song you want to keep.</p>
+              <p>Keep every translated song in your cloud library.</p>
             </div>
             <span class="premium-plan-badge${isPremium ? " active" : ""}">
               ${isPremium ? "✓ Active" : "Upgrade"}
             </span>
           </div>
 
+          <div class="premium-price-card">
+            <span>Plan</span>
+            <strong>${isPremium ? "Active" : "Unlimited saves"}</strong>
+            <p>${isPremium ? "Your account already has premium access." : "Upgrade when you are ready to keep more than the free limit."}</p>
+          </div>
+
           <ul class="premium-feature-list">
             <li><span class="feature-check">✓</span><span>Unlimited saved songs</span></li>
             <li><span class="feature-check">✓</span><span>Cloud library across devices</span></li>
-            <li><span class="feature-check">✓</span><span>Mandarin and Cantonese lyric study</span></li>
+            <li><span class="feature-check">✓</span><span>Mandarin and Cantonese study library</span></li>
           </ul>
         </section>
 
         <section class="checkout-panel" aria-label="Payment">
           <div class="checkout-heading">
-            <h2>${isPremium ? "You're Premium" : "Payment"}</h2>
+            <h2>${isPremium ? "You're Premium" : "Checkout"}</h2>
             <p>${escapeHtml(checkoutStatus)}</p>
           </div>
 
@@ -1246,16 +1291,37 @@ function renderPaymentPage() {
               <span>Plan</span>
               <strong>${escapeHtml(getPlanLabel())}</strong>
             </div>
+            <div class="account-detail-row">
+              <span>Saved songs</span>
+              <strong>${escapeHtml(savedUsageText)}</strong>
+            </div>
           </div>
+
+          <ol class="checkout-steps" aria-label="Checkout steps">
+            <li class="${isSignedIn ? "complete" : "current"}">
+              <span>1</span>
+              <strong>Sign in</strong>
+            </li>
+            <li class="${isPremium ? "complete" : isSignedIn ? "current" : ""}">
+              <span>2</span>
+              <strong>Checkout</strong>
+            </li>
+            <li class="${isPremium ? "complete" : ""}">
+              <span>3</span>
+              <strong>Refresh</strong>
+            </li>
+          </ol>
 
           ${
             isPremium
-              ? `<button class="secondary-action checkout-action" type="button" data-action="refresh-plan" ${state.auth.busy ? "disabled" : ""}>
-                  <span>${state.auth.busy ? "Checking" : "Refresh account"}</span>
-                </button>`
+              ? `<div class="checkout-actions">
+                  <button class="secondary-action checkout-action" type="button" data-action="refresh-plan" ${state.auth.busy ? "disabled" : ""}>
+                    <span>${state.auth.busy ? "Checking" : "Refresh account"}</span>
+                  </button>
+                </div>`
               : `<div class="checkout-actions">
                   <button class="secondary-action checkout-action" type="button" data-action="start-payment" ${canCheckout ? "" : "disabled"}>
-                    <span>Continue to payment</span>
+                    <span>${escapeHtml(primaryCheckoutLabel)}</span>
                   </button>
                   <button class="secondary-action ghost-action checkout-action" type="button" data-action="refresh-plan" ${isSignedIn && !state.auth.busy ? "" : "disabled"}>
                     <span>${state.auth.busy ? "Checking" : "Refresh account"}</span>
@@ -1496,6 +1562,11 @@ function render() {
     renderPaymentPage();
   } else {
     renderSearchScreen();
+  }
+
+  const deleteDialog = renderDeleteConfirmationDialog();
+  if (deleteDialog) {
+    root.insertAdjacentHTML("beforeend", deleteDialog);
   }
 
   bindContainedScrollAreas();
@@ -1980,6 +2051,28 @@ async function deleteSavedTranslation(index) {
   setMessage("Removed saved translation.");
 }
 
+function requestDeleteSavedTranslation(index) {
+  const savedItem = state.savedTranslations[index];
+  if (!savedItem) {
+    return;
+  }
+
+  state.pendingDeleteSavedTranslationId = savedItem.id;
+  render();
+}
+
+function cancelDeleteSavedTranslation() {
+  state.pendingDeleteSavedTranslationId = "";
+  render();
+}
+
+async function confirmDeleteSavedTranslation() {
+  const savedItemId = state.pendingDeleteSavedTranslationId;
+  const index = state.savedTranslations.findIndex((savedItem) => savedItem.id === savedItemId);
+  state.pendingDeleteSavedTranslationId = "";
+  await deleteSavedTranslation(index);
+}
+
 function handleInput(event) {
   const authField = event.target.dataset.authField;
   if (authField) {
@@ -2197,7 +2290,15 @@ function handleClick(event) {
   }
 
   if (action === "delete-saved") {
-    deleteSavedTranslation(Number(button.dataset.index));
+    requestDeleteSavedTranslation(Number(button.dataset.index));
+  }
+
+  if (action === "cancel-delete-saved") {
+    cancelDeleteSavedTranslation();
+  }
+
+  if (action === "confirm-delete-saved") {
+    confirmDeleteSavedTranslation();
   }
 
   if (action === "auth-sign-in") {
@@ -2213,10 +2314,17 @@ function handleClick(event) {
   }
 }
 
+function handleKeyDown(event) {
+  if (event.key === "Escape" && state.pendingDeleteSavedTranslationId) {
+    cancelDeleteSavedTranslation();
+  }
+}
+
 root.addEventListener("input", handleInput);
 root.addEventListener("compositionstart", handleCompositionStart);
 root.addEventListener("compositionend", handleCompositionEnd);
 root.addEventListener("click", handleClick);
+window.addEventListener("keydown", handleKeyDown);
 
 loadDraft();
 loadSavedTranslations();
