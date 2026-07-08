@@ -533,11 +533,17 @@ const requestHandler = async (request, response) => {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
       process.env.VITE_SUPABASE_ANON_KEY ||
       "";
+    const premiumCheckoutUrl =
+      process.env.PREMIUM_CHECKOUT_URL ||
+      process.env.NEXT_PUBLIC_PREMIUM_CHECKOUT_URL ||
+      process.env.VITE_PREMIUM_CHECKOUT_URL ||
+      "";
 
     return sendJson(response, 200, {
       cloudSyncEnabled: Boolean(supabaseUrl && supabaseAnonKey),
       supabaseUrl,
-      supabaseAnonKey
+      supabaseAnonKey,
+      premiumCheckoutUrl
     });
   }
 

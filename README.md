@@ -57,11 +57,12 @@ Saved songs sync across devices when Supabase is configured.
 ```txt
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
+PREMIUM_CHECKOUT_URL=your_payment_checkout_url
 ```
 
 After redeploying, the app shows an Account panel on the home screen. Sign in on your phone and laptop to share the same saved-song library.
 
-Free accounts can save up to 5 songs. Premium accounts can save without an app-level limit. To mark a signed-in user as premium, copy their user ID from Supabase Authentication -> Users, then run:
+Free accounts can save up to 5 songs. The top-right Get Premium button opens the in-app payment page and uses `PREMIUM_CHECKOUT_URL` for checkout. Premium accounts can save without an app-level limit. To mark a signed-in user as premium, copy their user ID from Supabase Authentication -> Users, then run:
 
 ```sql
 insert into public.profiles (user_id, plan)

@@ -29,6 +29,11 @@ const state = {
   searchResults: [],
   searchMeta: null,
   message: "",
+  paymentReturnScreen: "menu",
+  paymentMessage: "",
+  config: {
+    premiumCheckoutUrl: ""
+  },
   auth: {
     status: "disabled",
     user: null,
@@ -303,6 +308,10 @@ function getPlanLabel() {
   return isPremiumPlan() ? "Premium" : "Free";
 }
 
+function getPremiumStatusText() {
+  return isPremiumPlan() ? "Premium active" : "Get Premium";
+}
+
 function getSaveLimitMessage() {
   if (state.auth.status === "signed-out") {
     return `Free plan allows ${FREE_SAVE_LIMIT} saves. Sign in with a premium account for unlimited saves.`;
@@ -454,6 +463,8 @@ async function initializeCloudSync() {
   try {
     const response = await fetch("/api/config", { cache: "no-store" });
     const config = await response.json();
+    state.config.premiumCheckoutUrl =
+      typeof config.premiumCheckoutUrl === "string" ? config.premiumCheckoutUrl.trim() : "";
 
     if (!response.ok || !config.cloudSyncEnabled) {
       state.auth.status = "disabled";
@@ -966,7 +977,31 @@ function clearSearchResultsView() {
   }
 }
 
-function renderTopbar({ subtitle = `${romanizationLabel()} and English`, statusText = getStatusText(), statusIcon = getStatusIcon() } = {}) {
+function renderPremiumTopbarButton() {
+  const isPremium = isPremiumPlan();
+  const label = isPremium ? "Premium" : "Get Premium";
+  const title = isPremium ? "Premium is active" : "Get Premium";
+
+  return `
+    <button
+      class="premium-topbar-button${isPremium ? " premium" : ""}${state.screen === "payment" ? " active" : ""}"
+      type="button"
+      data-action="payment"
+      title="${escapeHtml(title)}"
+      aria-label="${escapeHtml(title)}"
+    >
+      ${isPremium ? `<span class="premium-check" aria-hidden="true">✓</span>` : ""}
+      <span>${escapeHtml(label)}</span>
+    </button>
+  `;
+}
+
+function renderTopbar({
+  subtitle = `${romanizationLabel()} and English`,
+  statusText = getStatusText(),
+  statusIcon = getStatusIcon(),
+  premiumControl = false
+} = {}) {
   const accountTitle = `Account: ${getPlanLabel()}`;
 
   return `
@@ -980,10 +1015,14 @@ function renderTopbar({ subtitle = `${romanizationLabel()} and English`, statusT
       </div>
 
       <div class="topbar-actions">
-        <div class="status-strip" role="status">
-          <span class="status-icon">${escapeHtml(statusIcon)}</span>
-          <span class="status-text">${escapeHtml(statusText)}</span>
-        </div>
+        ${
+          premiumControl
+            ? renderPremiumTopbarButton()
+            : `<div class="status-strip" role="status">
+                <span class="status-icon">${escapeHtml(statusIcon)}</span>
+                <span class="status-text">${escapeHtml(statusText)}</span>
+              </div>`
+        }
         <button
           class="icon-button account-icon-button${state.screen === "account" ? " active" : ""}"
           type="button"
@@ -1005,6 +1044,10 @@ function getAccountBackLabel() {
 
   if (state.accountReturnScreen === "detail") {
     return "Saved Song";
+  }
+
+  if (state.accountReturnScreen === "payment") {
+    return "Premium";
   }
 
   return "Main Menu";
@@ -1029,7 +1072,8 @@ function renderAccountPage() {
       ${renderTopbar({
         subtitle: "Account",
         statusText: `${planLabel} account`,
-        statusIcon: "i"
+        statusIcon: "i",
+        premiumControl: true
       })}
 
       <section class="toolbar" aria-label="Account navigation">
@@ -1059,6 +1103,14 @@ function renderAccountPage() {
               <strong>${escapeHtml(getSavedUsageText())}</strong>
             </div>
           </div>
+
+          ${
+            isPremiumPlan()
+              ? ""
+              : `<button class="secondary-action account-upgrade-action" type="button" data-action="payment">
+                  <span>Get Premium</span>
+                </button>`
+          }
         </section>
 
         ${renderAuthPanel()}
@@ -1067,15 +1119,140 @@ function renderAccountPage() {
   `;
 }
 
-function renderMenu() {
-  const savedCount = state.savedTranslations.length;
+function getPaymentBackLabel() {
+  if (state.paymentReturnScreen === "search") {
+    return "Lyrics";
+  }
 
+  if (state.paymentReturnScreen === "detail") {
+    return "Saved Song";
+  }
+
+  if (state.paymentReturnScreen === "account") {
+    return "Account";
+  }
+
+  return "Main Menu";
+}
+
+function getPremiumCheckoutUrl() {
+  const checkoutUrl = state.config.premiumCheckoutUrl;
+  if (!checkoutUrl) {
+    return "";
+  }
+
+  try {
+    const url = new URL(checkoutUrl, window.location.href);
+    if (state.auth.user?.id) {
+      url.searchParams.set("user_id", state.auth.user.id);
+    }
+    if (state.auth.email) {
+      url.searchParams.set("email", state.auth.email);
+    }
+    url.searchParams.set("return_url", window.location.href);
+    return url.toString();
+  } catch {
+    return checkoutUrl;
+  }
+}
+
+function renderPaymentPage() {
+  const isPremium = isPremiumPlan();
+  const checkoutUrl = getPremiumCheckoutUrl();
+  const isSignedIn = state.auth.status === "signed-in";
+  const canCheckout = !isPremium && isSignedIn && Boolean(checkoutUrl);
+  const checkoutStatus = isPremium
+    ? "Premium is active."
+    : !checkoutUrl
+      ? "Payment is not connected yet."
+      : isSignedIn
+        ? "Ready for secure checkout."
+        : "Sign in before checkout.";
+
+  root.innerHTML = `
+    <main class="app-shell payment-shell">
+      ${renderTopbar({
+        subtitle: "Premium",
+        statusText: getPremiumStatusText(),
+        statusIcon: isPremium ? "✓" : "$",
+        premiumControl: true
+      })}
+
+      <section class="toolbar" aria-label="Premium navigation">
+        <button class="secondary-action home-action" type="button" data-action="payment-back">
+          <span class="button-icon">←</span>
+          <span>${escapeHtml(getPaymentBackLabel())}</span>
+        </button>
+      </section>
+
+      <section class="payment-page" aria-label="Premium checkout">
+        <section class="premium-summary">
+          <div class="premium-summary-heading">
+            <div>
+              <h2>Premium</h2>
+              <p>Save every translated song you want to keep.</p>
+            </div>
+            <span class="premium-plan-badge${isPremium ? " active" : ""}">
+              ${isPremium ? "✓ Active" : "Upgrade"}
+            </span>
+          </div>
+
+          <ul class="premium-feature-list">
+            <li><span class="feature-check">✓</span><span>Unlimited saved songs</span></li>
+            <li><span class="feature-check">✓</span><span>Cloud library across devices</span></li>
+            <li><span class="feature-check">✓</span><span>Mandarin and Cantonese lyric study</span></li>
+          </ul>
+        </section>
+
+        <section class="checkout-panel" aria-label="Payment">
+          <div class="checkout-heading">
+            <h2>${isPremium ? "You're Premium" : "Payment"}</h2>
+            <p>${escapeHtml(checkoutStatus)}</p>
+          </div>
+
+          <div class="account-detail-list">
+            <div class="account-detail-row">
+              <span>Account</span>
+              <strong>${escapeHtml(isSignedIn ? state.auth.email || "Signed in" : "Not signed in")}</strong>
+            </div>
+            <div class="account-detail-row">
+              <span>Plan</span>
+              <strong>${escapeHtml(getPlanLabel())}</strong>
+            </div>
+          </div>
+
+          ${
+            isPremium
+              ? `<button class="secondary-action checkout-action" type="button" data-action="refresh-plan" ${state.auth.busy ? "disabled" : ""}>
+                  <span>${state.auth.busy ? "Checking" : "Refresh account"}</span>
+                </button>`
+              : `<div class="checkout-actions">
+                  <button class="secondary-action checkout-action" type="button" data-action="start-payment" ${canCheckout ? "" : "disabled"}>
+                    <span>Continue to payment</span>
+                  </button>
+                  <button class="secondary-action ghost-action checkout-action" type="button" data-action="refresh-plan" ${isSignedIn && !state.auth.busy ? "" : "disabled"}>
+                    <span>${state.auth.busy ? "Checking" : "Refresh account"}</span>
+                  </button>
+                </div>`
+          }
+
+          ${state.paymentMessage ? `<p class="payment-message">${escapeHtml(state.paymentMessage)}</p>` : ""}
+        </section>
+
+        ${isSignedIn ? "" : renderAuthPanel()}
+      </section>
+    </main>
+  `;
+}
+
+function renderMenu() {
   root.innerHTML = `
     <main class="app-shell menu-shell">
       ${renderTopbar({
         subtitle: "Saved songs",
-        statusText: getSavedUsageText(savedCount),
-        statusIcon: "#"
+        statusText: getPremiumStatusText(),
+        statusIcon: isPremiumPlan() ? "✓" : "$",
+        premiumControl: true
       })}
 
       <section class="menu-actions" aria-label="Search options">
@@ -1235,6 +1412,8 @@ function render() {
     renderSavedDetail();
   } else if (state.screen === "account") {
     renderAccountPage();
+  } else if (state.screen === "payment") {
+    renderPaymentPage();
   } else {
     renderSearchScreen();
   }
@@ -1507,7 +1686,7 @@ function showMenu() {
 
 function showAccount() {
   if (state.screen !== "account") {
-    state.accountReturnScreen = ["menu", "search", "detail"].includes(state.screen) ? state.screen : "menu";
+    state.accountReturnScreen = ["menu", "search", "detail", "payment"].includes(state.screen) ? state.screen : "menu";
   }
 
   state.screen = "account";
@@ -1516,10 +1695,58 @@ function showAccount() {
 }
 
 function returnFromAccount() {
-  state.screen = ["menu", "search", "detail"].includes(state.accountReturnScreen)
+  state.screen = ["menu", "search", "detail", "payment"].includes(state.accountReturnScreen)
     ? state.accountReturnScreen
     : "menu";
   state.message = "";
+  render();
+}
+
+function showPayment() {
+  if (state.screen !== "payment") {
+    state.paymentReturnScreen = ["menu", "search", "detail", "account"].includes(state.screen) ? state.screen : "menu";
+  }
+
+  state.screen = "payment";
+  state.paymentMessage = "";
+  state.message = "";
+  render();
+}
+
+function returnFromPayment() {
+  state.screen = ["menu", "search", "detail", "account"].includes(state.paymentReturnScreen)
+    ? state.paymentReturnScreen
+    : "menu";
+  state.paymentMessage = "";
+  state.message = "";
+  render();
+}
+
+function startPremiumCheckout() {
+  const checkoutUrl = getPremiumCheckoutUrl();
+  if (!checkoutUrl || state.auth.status !== "signed-in" || isPremiumPlan()) {
+    return;
+  }
+
+  window.location.assign(checkoutUrl);
+}
+
+async function refreshAccountPlan() {
+  if (!supabaseClient || !state.auth.user || state.auth.busy) {
+    state.paymentMessage = "Sign in to refresh your account.";
+    render();
+    return;
+  }
+
+  state.auth.busy = true;
+  state.paymentMessage = "Checking your account...";
+  render();
+
+  await loadAccountPlan(state.auth.user);
+  enforceSavedTranslationLimit();
+
+  state.auth.busy = false;
+  state.paymentMessage = isPremiumPlan() ? "Premium is active." : "Premium is not active yet.";
   render();
 }
 
@@ -1658,6 +1885,22 @@ function handleClick(event) {
 
   if (action === "account-back") {
     returnFromAccount();
+  }
+
+  if (action === "payment") {
+    showPayment();
+  }
+
+  if (action === "payment-back") {
+    returnFromPayment();
+  }
+
+  if (action === "start-payment") {
+    startPremiumCheckout();
+  }
+
+  if (action === "refresh-plan") {
+    refreshAccountPlan();
   }
 
   if (action === "start-search") {
