@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+await loadEnvFile(join(root, ".env"));
 const defaultPort = 5173;
 const requestedPort = Number(process.env.PORT || defaultPort);
 const host = "0.0.0.0";
@@ -13,6 +14,50 @@ const maxBodyBytes = 1_000_000;
 const appUserAgent = "Lyric Lens/0.1 local PWA";
 const portRetryLimit = 10;
 const myMemoryMaxChars = 450;
+
+async function loadEnvFile(envPath) {
+  let contents = "";
+
+  try {
+    contents = await readFile(envPath, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn(`Could not read ${envPath}: ${error.message}`);
+    }
+    return;
+  }
+
+  contents.split(/\r?\n/).forEach((line) => {
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith("#")) {
+      return;
+    }
+
+    const envLine = trimmedLine.startsWith("export ") ? trimmedLine.slice(7).trim() : trimmedLine;
+    const separatorIndex = envLine.indexOf("=");
+    if (separatorIndex === -1) {
+      return;
+    }
+
+    const key = envLine.slice(0, separatorIndex).trim();
+    let value = envLine.slice(separatorIndex + 1).trim();
+
+    if (!key || Object.hasOwn(process.env, key)) {
+      return;
+    }
+
+    const quote = value[0];
+    if ((quote === `"` || quote === "'") && value.endsWith(quote)) {
+      value = value.slice(1, -1);
+    }
+
+    if (quote === `"`) {
+      value = value.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t");
+    }
+
+    process.env[key] = value;
+  });
+}
 
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
   console.error("PORT must be a number from 1 to 65535.");

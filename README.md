@@ -52,7 +52,7 @@ Saved songs sync across devices when Supabase is configured.
 
 1. Create a Supabase project.
 2. In Supabase SQL Editor, run `supabase/schema.sql`.
-3. In Vercel, add these environment variables:
+3. For local development, copy `.env.example` to `.env` and fill in these values. For Vercel, add the same values in Settings -> Environment Variables:
 
 ```txt
 SUPABASE_URL=your_supabase_project_url
