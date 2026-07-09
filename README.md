@@ -42,6 +42,7 @@ The browser app is served as static files, and these Vercel Functions handle ser
 /api/translate
 /api/lyrics-search
 /api/config
+/api/stripe-webhook
 ```
 
 Add `OPENAI_API_KEY` as a Vercel environment variable if you want OpenAI translations. Without it, the app uses the fallback translator.
@@ -58,11 +59,32 @@ Saved songs sync across devices when Supabase is configured.
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
 PREMIUM_CHECKOUT_URL=your_payment_checkout_url
+STRIPE_WEBHOOK_SECRET=your_stripe_webhook_signing_secret
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 ```
 
 After redeploying, the app shows an Account panel on the home screen. Sign in on your phone and laptop to share the same saved-song library.
 
-Free accounts can save up to 5 songs. The top-right Get Premium button opens the in-app payment page and uses `PREMIUM_CHECKOUT_URL` for checkout. Premium accounts can save without an app-level limit. To mark a signed-in user as premium, copy their user ID from Supabase Authentication -> Users, then run:
+Free accounts can save up to 5 songs. The top-right Get Premium button opens the in-app payment page and uses `PREMIUM_CHECKOUT_URL` for checkout. Premium accounts can save without an app-level limit.
+
+To make Stripe payments unlock Premium automatically, add a Stripe webhook endpoint:
+
+```txt
+https://your-domain.example/api/stripe-webhook
+```
+
+Listen for:
+
+```txt
+checkout.session.completed
+checkout.session.async_payment_succeeded
+```
+
+Copy the endpoint signing secret from Stripe into `STRIPE_WEBHOOK_SECRET`. Copy the Supabase service-role key into `SUPABASE_SERVICE_ROLE_KEY`. These two values are server-only secrets and must not be exposed in browser code.
+
+The app sends the signed-in Supabase user ID to Stripe as `client_reference_id`, and the webhook uses that ID to update the matching Supabase profile to Premium.
+
+To manually mark a signed-in user as premium, copy their user ID from Supabase Authentication -> Users, then run:
 
 ```sql
 insert into public.profiles (user_id, plan)

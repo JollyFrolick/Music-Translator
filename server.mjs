@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
+import { handleStripeWebhook } from "./lib/api-handlers.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 await loadEnvFile(join(root, ".env"));
@@ -599,6 +600,11 @@ const requestHandler = async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/api/lyrics-search") {
     await handleLyricsSearch(request, response);
+    return;
+  }
+
+  if (url.pathname === "/api/stripe-webhook") {
+    await handleStripeWebhook(request, response);
     return;
   }
 

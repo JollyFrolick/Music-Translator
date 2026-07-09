@@ -579,7 +579,10 @@ async function signOutFromCloud() {
   if (error) {
     state.auth.message = error.message || "Sign out failed.";
     render();
+    return;
   }
+
+  showMenu();
 }
 
 function escapeHtml(value) {
@@ -1193,6 +1196,10 @@ function getPaymentBackLabel() {
   return "Main Menu";
 }
 
+function isStripeCheckoutUrl(url) {
+  return url.hostname === "buy.stripe.com" || url.hostname === "checkout.stripe.com";
+}
+
 function getPremiumCheckoutUrl() {
   const checkoutUrl = state.config.premiumCheckoutUrl;
   if (!checkoutUrl) {
@@ -1201,13 +1208,22 @@ function getPremiumCheckoutUrl() {
 
   try {
     const url = new URL(checkoutUrl, window.location.href);
-    if (state.auth.user?.id) {
-      url.searchParams.set("user_id", state.auth.user.id);
+    if (isStripeCheckoutUrl(url)) {
+      if (state.auth.user?.id) {
+        url.searchParams.set("client_reference_id", state.auth.user.id);
+      }
+      if (state.auth.email) {
+        url.searchParams.set("prefilled_email", state.auth.email);
+      }
+    } else {
+      if (state.auth.user?.id) {
+        url.searchParams.set("user_id", state.auth.user.id);
+      }
+      if (state.auth.email) {
+        url.searchParams.set("email", state.auth.email);
+      }
+      url.searchParams.set("return_url", window.location.href);
     }
-    if (state.auth.email) {
-      url.searchParams.set("email", state.auth.email);
-    }
-    url.searchParams.set("return_url", window.location.href);
     return url.toString();
   } catch {
     return checkoutUrl;
@@ -1232,7 +1248,7 @@ function renderPaymentPage() {
     : !isSignedIn
       ? "Sign in to continue"
       : checkoutUrl
-        ? "Continue to secure checkout"
+        ? "Continue to checkout"
         : "Checkout unavailable";
 
   root.innerHTML = `
@@ -1273,6 +1289,7 @@ function renderPaymentPage() {
             <li><span class="feature-check">✓</span><span>Unlimited saved songs</span></li>
             <li><span class="feature-check">✓</span><span>Cloud library across devices</span></li>
             <li><span class="feature-check">✓</span><span>Mandarin and Cantonese study library</span></li>
+            <li><span class="feature-check">✓</span><span>Customisable layouts (coming soon)</span></li>
           </ul>
         </section>
 
@@ -1833,6 +1850,7 @@ function showMenu() {
   state.accountReturnScreen = "menu";
   state.currentSavedTranslationId = "";
   state.isEditingSavedTranslation = false;
+  state.pendingDeleteSavedTranslationId = "";
   state.message = "";
   render();
 }
